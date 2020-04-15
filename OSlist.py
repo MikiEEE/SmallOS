@@ -133,13 +133,25 @@ class smallPID():
 
 
 class OSList(smallPID): 
-    """
-    *Need to maintain a lost of all the tasks in order 
-    *Have linked list functionality by priority 
-    """
-    
+    '''
+    @class OSList - Creates Binary Search List that contains
+        elements of class SmallTask(). All elements are stored
+        in the list by order of PID; however all elements are also 
+        Nodes of a LinkedList that is sorted by priority. 
+
+        Plan on adding a speed optimized and less space efficient mode 
+        in the near future.
+    '''
 
     def __init__(self, priors=5, length=2**12):
+        '''
+        @function __init__() - takes in the number of priorities to be  
+            used in the OS to create the linked list and takes in the
+            amount of allowed processes and sets up the datastructures. 
+        @param proiors - int - the number of priorities allowed on the system. 
+                                numbers: 0 - (priors - 1)
+        @length - int - the number of allowed processes. 
+        '''
         smallPID.__init__(self,length)
         self.cats = [None] * priors
         self.catSelect = 0
@@ -150,19 +162,39 @@ class OSList(smallPID):
 
 
     def resetCatSel(self):
+        '''
+        @function resetCatSel() - reinitializes the catSelect variable to 
+            zero so self.pop() function can start from the highest priority. 
+        @return - void 
+        '''
         catSelect = 0
         return 
 
 
     def setCatSel(self, newSel):
+        '''
+        @function setCatSel() - when a valid higher priority task is
+            added to the tasklist the next self.pop() result will be set to 
+            look to that higher priority rather then the previous next element. 
+        @param newSel - the priority of the new task. 
+        @return - int - 0 on a valid priority and -1 on an invalid priority. 
+        '''
         if 0 < newSel < len(self.cats):
             if self.catSelect > newSel:
                 self.catSelect = newSel
+                self.current = None
             return 0
         return -1
 
 
     def availCat(self,sel=0):
+        '''
+        @function availCat() - goes through the categories 
+            and finds the next available task category. 
+        @param sel - int - the starting index of of the category select
+            list. 
+        @return - SmallTask() - a non-void task to be executed. 
+        '''
         result = None
         for task in self.cats[sel:]:
             if task != None:
@@ -172,6 +204,12 @@ class OSList(smallPID):
 
 
     def incrementCat(self):
+        '''
+        @function incrementCat() - increments the category tracker
+            by 1 and if the ctracker is out of array bounds, the tracker
+            is set back to 0. 
+        @return - void
+        '''
         if self.catSelect < len(self.cats):
             self.catSelect += 1
         if self.catSelect == len(self.cats):
@@ -180,6 +218,12 @@ class OSList(smallPID):
 
 
     def pop(self):
+        '''
+        @function pop() - gets the current highest priority node 
+            in the queue, works through the entire queue.
+        @return - SmallTask() - the highest priority object 
+            in the queue.
+        '''
         if self.current == None:
             self.current = self.availCat()
         elif self.current.next != None:
@@ -191,6 +235,13 @@ class OSList(smallPID):
 
 
     def insert(self, task):
+        '''
+        @function insert() - inserts the task 
+            inorder (by pid) in the task list array and adds 
+            task to a doubly-linked-list in order (by priority)
+        @param task - SmallTask() - to be added to the OSlist.
+        @return - int - positive integer on success, -1 on failure. 
+        '''
         priority = task.priority
         if priority < len(self.cats):
 
@@ -214,15 +265,27 @@ class OSList(smallPID):
 
 
     def search(self,pid):
+        '''
+        @function search() - performs binary search to find and retrieve 
+            a process by pid. 
+        @param pid - int - the pid of the requested process. 
+        @return - SmallTask() on success | -1 on Failure - returns the task with 
+            the matching pid on success and -1 if a process with that pid does not exist.  
+        '''
         length = len(self.tasks)
         index = bList.search(self.tasks,pid,0,length,self.func)
-        if index != -1:
-            return self.tasks[index]
-        else:
-            return index
+        if index != -1: return index
+        return self.tasks[index]
 
 
     def delete(self,pid):
+    '''
+    @function delete() - performs binary search to find and delete a process
+        by pid.
+    @param pid - int - the pid of the requested process.
+    @return  - int - 0 on successful deletion and -1 if the process is not
+        found.
+    '''
         length = len(self.tasks)
         index = bList.search(self.tasks,pid,0,length,self.func)
         if index == -1: return -1
@@ -233,10 +296,18 @@ class OSList(smallPID):
 
 
     def __len__(self):
+    '''
+    @function __len__() - returns the number of tasks 
+        within the OSlist().
+    '''
         return len(self.tasks)
 
 
     def __str__(self):
+    '''
+    @function __str__() - return the string representation 
+        of all the tasks within the OSlist()
+    '''
         return '\n'.join([str(x) for x in self.tasks])
 
 
