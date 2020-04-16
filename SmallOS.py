@@ -88,24 +88,6 @@ class smallOS(smallIO):
                     self.shells.append(shells) 
 
 
-
-    def getTasks(self):
-        '''
-        @function getTasks() - retrieves a list of
-            all of the active tasks.
-        @return list() of active tasks.
-        '''
-        return self.tasks
-
-
-    def getAllTasks(self):
-        allTasks = list()
-        allTasks.extend(self.tasks)
-        allTasks.extend(self.sleepTasks)
-        allTasks.extend(self.waitingTasks)
-        return allTasks
-
-
     def addTasks(self, newTasks):
         '''
         @function addTasks() - takes in a list of tasks
@@ -189,28 +171,7 @@ class smallOS(smallIO):
             ids = self.addTask(children)
         return ids
 
-    def wait(self,task):
-        self.waitingTasks.append(task)
-        self.tasks.remove(task)
-        return
 
-    def endWait(self,task):
-        self.waitingTasks.remove(task)
-        self.tasks.append(task)
-        self.tasks = sorted(self.tasks, key=lambda task: task.priority, reverse=False)
-        return
-
-    def putToSleep(self,task):
-        self.sleepTasks.append(task)
-        self.tasks.remove(task)
-        return 
-
-
-    def wakeTask(self,task):
-        self.tasks.append(task)
-        self.sleepTasks.remove(task)
-        self.tasks = sorted(self.tasks, key=lambda task: task.priority, reverse=False)
-        return 
 
 
     def __str__(self):
