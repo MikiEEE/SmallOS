@@ -94,22 +94,33 @@ class Node():
 
 
 
+
 class smallPID():
     '''
-    @class smallPID() - Used to select and keep track 
-        of process ID's in use and available. 
+    @class smallPID() - Creates and keeps track of avialable
+        Process ID's
     '''
 
     def __init__(self, max=2**16):
         '''
-        @param 
+        @function __init__() - Initializes essential maintenence 
+            structures.
+        @param max - int - The max number of process ID's.
+            Valid process ID's are 0 - (max - 1).
+        @return - void
         '''
         self.pastPid = 0
         self.maxPID = max
         self.usedPID = set()
+        return
 
 
     def newPID(self):
+        '''
+        @function newPID() - Creates a new valid PID. 
+        @return - int - positive integer on succes 
+            -1 on failure.
+        '''
         if len(self.usedPID) < self.maxPID:
             pid = self.pastPid
             while pid%self.maxPID in self.usedPID: pid+=1
@@ -124,6 +135,12 @@ class smallPID():
 
 
     def freePID(self,pid):
+        '''
+        @function freePID - removes the pid from the used 
+            pid set() making the pid available for future 
+            use.
+        @return - void
+        '''
         if pid in self.usedPID:
             self.usedPID.remove(pid)
         return 
