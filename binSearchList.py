@@ -3,12 +3,26 @@ import math
 import random
 import pdb
 
-def round_up(n, decimals=0): 
-    multiplier = 10 ** decimals 
-    return math.ceil(n * multiplier) / multiplier
+
 
 
 def search(data,target,l,r, func=None):
+	'''
+	@function search - Performs a binary search on a sorted list 
+		and returns the index of the found element. 
+	@param data - list - The list to be passed in. 
+	@param target - obj - the key that you are searching for.
+	@param l - int - the left most index. 
+	@param r - int -  the right most index.
+	@param func - function - the look up function to 
+		extract the sorting criteria out of custom objects. 
+	
+	example: 
+		func = lambda list, index: list[index].getPID()
+		search(tasks,pid,0,length,lambda data, func)
+
+	@return - int - the index where the element should be added.
+	'''
 	if func == None:
 		func = lambda dat,index: dat[index]
 
@@ -28,6 +42,22 @@ def search(data,target,l,r, func=None):
 
 
 def insert(data,target,l,r,func=None):
+	'''
+	@function insert - Performs a binary search on a sorted list 
+		and returns the index of where the element should be added. 
+	@param data - list - The list to be passed in. 
+	@param target - obj - the key that you are searching for.
+	@param l - int - the left most index. 
+	@param r - int -  the right most index.
+	@param func - function - the look up function to 
+		extract the sorting criteria out of custom objects. 
+	
+	example: 
+		func = lambda list, index: list[index].getPID()
+		insert(tasks,pid,0,length,lambda data, func)
+
+	@return - int - the index where the element should be added.
+	'''
 	if func == None:
 		func = lambda dat,index: dat[index]
 
@@ -44,9 +74,18 @@ def insert(data,target,l,r,func=None):
 	else:
 		return l
 
-
+def round_up(n, decimals=0): 
+	'''
+	Rounds the value up
+	Used For testing will be put in another file 
+	'''
+	multiplier = 10 ** decimals
+	return math.ceil(n * multiplier) / multiplier
 
 def test_search():
+	'''
+	Used For testing will be put in another file 
+	'''
 	global count 
 	flaws = list()
 	for x in range(LENGTH):
@@ -61,12 +100,18 @@ def test_search():
 
 
 def insertNode(test_Insert,x):
+	'''
+	Used For testing will be put in another file 
+	'''
 	result = insert(test_Insert,x,0,len(test_Insert))
 	test_Insert.insert(result,x)
 	return  test_Insert
 
 
 def test_insert():
+	'''
+	Used For testing will be put in another file 
+	'''
 	toSort = [random.randint(-LENGTH,LENGTH) for x in range(LENGTH)]
 	test_Insert = []
 	print(toSort[1:10])
@@ -76,7 +121,7 @@ def test_insert():
 		print(test_insert[1:10])
 		print('True')
 
-		
+
 
 if __name__=='__main__':
 
