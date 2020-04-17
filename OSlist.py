@@ -52,7 +52,6 @@ def removeNode(node):
         doubly-linked-list
     @param node -  Node() - Node to be removed from the list.
     @return void
-
     ***NOTE
         The node is not deleted from memory but only 
         from the list. ***
@@ -155,7 +154,6 @@ class OSList(smallPID):
         elements of class SmallTask(). All elements are stored
         in the list by order of PID; however all elements are also 
         Nodes of a LinkedList that is sorted by priority. 
-
         Plan on adding a speed optimized and less space efficient mode 
         in the near future.
     '''
@@ -291,18 +289,18 @@ class OSList(smallPID):
         '''
         length = len(self.tasks)
         index = bList.search(self.tasks,pid,0,length,self.func)
-        if index != -1: return index
+        if index == -1: return index
         return self.tasks[index]
 
 
     def delete(self,pid):
-    '''
-    @function delete() - performs binary search to find and delete a process
-        by pid.
-    @param pid - int - the pid of the requested process.
-    @return  - int - 0 on successful deletion and -1 if the process is not
-        found.
-    '''
+        '''
+        @function delete() - performs binary search to find and delete a process
+            by pid.
+        @param pid - int - the pid of the requested process.
+        @return  - int - 0 on successful deletion and -1 if the process is not
+            found.
+        '''
         length = len(self.tasks)
         index = bList.search(self.tasks,pid,0,length,self.func)
         if index == -1: return -1
@@ -313,18 +311,18 @@ class OSList(smallPID):
 
 
     def __len__(self):
-    '''
-    @function __len__() - returns the number of tasks 
-        within the OSlist().
-    '''
+        '''
+        @function __len__() - returns the number of tasks 
+            within the OSlist().
+        '''
         return len(self.tasks)
 
 
     def __str__(self):
-    '''
-    @function __str__() - return the string representation 
-        of all the tasks within the OSlist()
-    '''
+        '''
+        @function __str__() - return the string representation 
+            of all the tasks within the OSlist()
+        '''
         return '\n'.join([str(x) for x in self.tasks])
 
 
@@ -347,9 +345,3 @@ if __name__ == '__main__':
         cursor = tasks.pop()
 
     print(len(tasks))
-
-
-
-
-
-
