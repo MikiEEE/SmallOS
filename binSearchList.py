@@ -1,4 +1,3 @@
-
 from numpy import log as ln
 import math 
 import random
@@ -46,6 +45,39 @@ def insert(data,target,l,r,func=None):
 		return l
 
 
+
+def test_search():
+	global count 
+	flaws = list()
+	for x in range(LENGTH):
+		count = 0
+		target = random.randint(0,LENGTH)
+		print(search(data,target,0,len(data)))
+		if count > MAXTIME: 
+			flaws.append("Error with %s, count %s , max: %s " % (x, count, MAXTIME))
+	print(search(data,-1,-1,len(data)))
+	print(search(data,LENGTH,-1,len(data)))
+	[print(x) for x in flaws]
+
+
+def insertNode(test_Insert,x):
+	result = insert(test_Insert,x,0,len(test_Insert))
+	test_Insert.insert(result,x)
+	return  test_Insert
+
+
+def test_insert():
+	toSort = [random.randint(-LENGTH,LENGTH) for x in range(LENGTH)]
+	test_Insert = []
+	print(toSort[1:10])
+	for x in toSort:
+		test_insert = insertNode(test_Insert,x)
+	if test_Insert == sorted(toSort):
+		print(test_insert[1:10])
+		print('True')
+
+		
+
 if __name__=='__main__':
 
 	LENGTH = 2**12
@@ -58,41 +90,9 @@ if __name__=='__main__':
 
 	count = 0
 
-	def test_search():
-		global count 
-		flaws = list()
-		for x in range(LENGTH):
-			count = 0
-			target = random.randint(0,LENGTH)
-			print(search(data,target,0,len(data)))
-			if count > MAXTIME: 
-				flaws.append("Error with %s, count %s , max: %s " % (x, count, MAXTIME))
-		print(search(data,-1,-1,len(data)))
-		print(search(data,LENGTH,-1,len(data)))
-		[print(x) for x in flaws]
 
 
-	def insert(test_Insert,x):
-		result = insert(test_Insert,x,0,len(test_Insert))
-		test_Insert.insert(result,x)
-		return  test_Insert
-
-
-	def test_insert():
-		toSort = [random.randint(-LENGTH,LENGTH) for x in range(LENGTH)]
-		test_Insert = []
-		print(toSort[1:10])
-		for x in toSort:
-			test_insert = insert(test_Insert,x)
-		if test_Insert == sorted(toSort):
-			print('True')
-		# insert(test_Insert,4)
-		# insert(test_Insert,8)
-		# insert(test_Insert,1)
-		# insert(test_Insert,5)
 			
 
-	# test_search()
-	# test_insert()
-
-
+	test_search()
+	test_insert()

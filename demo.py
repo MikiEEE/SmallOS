@@ -35,7 +35,6 @@ def forkDemo(OS, taskObj):
         if taskObj.getPlace():
             vars = list()
             vars.append(1)
-            OS.smAppPrint("PARENT SLEEPING\n")
             pids = [OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=taskObj,name=str(x))) for x in range(2**5)]
             OS.smAppPrint("Adding \n")
             OS.fork(smallTask(9,forkDemo,1,name='child',parent=taskObj))
@@ -107,6 +106,7 @@ def sleepDemo(OS, taskObj):
 
 
 def sleepAndSuspendDemo(OS, taskObj):
+    print('hello')
     if taskObj.getPlace():
         OS.smAppPrint("First Phrase","\n")
         OS.fork(smallTask(8,send,1,parent=taskObj))
@@ -146,9 +146,20 @@ if __name__ == '__main__':
         OS = smallOS(shells=base)
 
         tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+        fails = list()
         #OS.addTasks([demo_1,demo_2,demo_3,demo_4])
-        #OS.addTasks([demo_3])
-        OS.addTask(tasks[0])
-        OS.start()
+        # OS.addTasks([demo_4])
+        # OS.start()
+        for num, demo in enumerate(tasks):
+            try:
+                OS.addTask(demo)
+                OS.start()
+            except: 
+                fails.append(num + 1)
+
+        if len(fails) == 0:
+            print('ALL DEMOS COMPLETED SUCCESSFULLY')
+        else:
+            print(fails)
         # OS.smAppPrint(OS,'\n')
 

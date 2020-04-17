@@ -85,6 +85,7 @@ class smallSignals(placeHolder):
         if kwargs:
             if kwargs.get('handlers',False):
                 self.handlers = kwargs['handlers']
+            else: self.handlers = None
         return 
 
     
