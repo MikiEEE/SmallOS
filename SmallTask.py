@@ -80,9 +80,18 @@ class placeHolder():
 
 
 class smallSignals(placeHolder):
-
+    '''
+    @class smallSignals - Class designed to handle all of the 
+        signal oriented interprocess communication. 
+    '''
     def __init__(self, kwargs):
-        self.signals = [0] * 5
+        '''
+        @fucntion __init__() - Takes in kwargs and extracts the signal handler
+            function. 
+        '''
+
+        #Need to add adjustable signals.
+        self.signals = [0] * 32
         self.isWaiting = 0
         self.isSleep = 0
         self.wakeSigs = list()
@@ -179,12 +188,31 @@ class smallSignals(placeHolder):
             self.sleepTime = secs
         return 0
 
+
     def wake(self):
+        '''
+        @function wake() - Wakes the task up by setting the isSleep attribute
+            to 0. 
+        @return void
+        '''
         self.isSleep = 0
         return
 
 
     def checkSleep(self):
+        '''
+        @function checkSleep() - Checks to see if the alotted time has passed 
+        if the correct amount of time has passed then the task is woken back up. 
+        
+        @return - int - Task PID on successful wake up,
+        -1 if in INDEFINITE till sig wake mode, 
+        -1 if time constraint has not been met yet, 
+        -1 if the task isn't sleep.
+        
+        ***NOTE if this is an embedded application, make sure the time
+            library can be imported... if not, it might be best to use 
+            the sigsuspendV2() function.        
+        '''
         if self.isSleep == 1:
             if self.sleepTime == -1: return -1
 
@@ -286,7 +314,8 @@ class smallSignals(placeHolder):
 class smallTask(smallSignals, Node):
     '''
     @Class smallTask() - Object that contains Tasks contents: The routine,
-        information, name, ID number, signals.
+        information, name, ID number, signals and other functions that tasks
+        will need to interact with the OS and other Tasks.
     '''
 
 
@@ -394,20 +423,33 @@ class smallTask(smallSignals, Node):
 
 
     def getExeStatus(self):
-        status = bool(False)
-        status = bool(self.isReady == 1) and bool(self.isWaiting == 0)
-        status = status and bool(self.isSleep == 0)
+        '''
+        @function getExeStatus() - Checks all of the process's statuses to see
+            if the process is ready to be executed. 
+        @return - bool - True for if the Task can be Executed and False if 
+            it is not. 
+        '''
+        status = (self.isReady == 1) and (self.isWaiting == 0)
+        status = status and (self.isSleep == 0)
         return status 
 
 
     def getDelStatus(self):
-        status = bool(False)
-        status = bool(self.isReady == 0) and bool(self.isWaiting == 0)
-        status = status and bool(self.isSleep == 0)
+        '''
+        @function getDelStatus() - Checks all of the process's statuses to 
+        see if the process needs to be deleted.
+        @return - bool - True for if the process can be deleted and False if 
+            it can not.       
+        '''
+        status = (self.isReady == 0) and (self.isWaiting == 0)
+        status &= (self.isSleep == 0)
         return status 
 
 
     def stat(self):
+        '''
+        @function stat() - gets a string of the statuses in greater detail. 
+        '''
         msg = "\nisReady={}\nisWaiting={}\nisSleep={}\n".format(self.isReady,
                                                     self.isWaiting,
                                                     self.isSleep)
