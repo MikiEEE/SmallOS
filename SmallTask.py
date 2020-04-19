@@ -33,9 +33,13 @@ class Node():
 
 
 class placeHolder():
-    #determines where task resumes in the event of a sigsuspend() call.
+    '''
+    @class PlaceHolder() - Maintains the positional state of a process 
+        in the event of something similar to a sleep() or sigSuspendV2() call.
+    '''
 
     def __init__(self):
+
         self.placeholder = 0 
         self.lastPlaceHolder = 0 
         self.timeKeeper = 0
@@ -44,7 +48,7 @@ class placeHolder():
         return 
 
 
-    def getPlace(self) -> bool:
+    def getPlace(self):
         if self.isUsed == True:
             return False
 
