@@ -144,7 +144,7 @@ class smallOS(smallIO):
             if cursor.getExeStatus():
                 result = cursor.excecute(self)
             else:
-                cursor.checkSleep()
+                self.tasks.setCatSel(cursor.checkSleep())
 
             if update == -1 and result == 0 and cursor.getDelStatus():
                 self.tasks.delete(cursor.pid)
@@ -170,8 +170,6 @@ class smallOS(smallIO):
         else:
             ids = self.addTask(children)
         return ids
-
-
 
 
     def __str__(self):
