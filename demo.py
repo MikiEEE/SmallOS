@@ -35,7 +35,7 @@ def forkDemo(OS, taskObj):
         if taskObj.getPlace():
             vars = list()
             vars.append(1)
-            pids = [OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=taskObj,name=str(x))) for x in range(2**5)]
+            pids = [OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=taskObj,name=str(x))) for x in range(2**9)]
             OS.smAppPrint("Adding \n")
             OS.fork(smallTask(9,forkDemo,1,name='child',parent=taskObj))
             OS.smAppPrint("PARENT SLEEPING\n")

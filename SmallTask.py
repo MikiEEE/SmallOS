@@ -7,7 +7,19 @@ and was made with the intent of being entirely opensource.
 Enjoy!
 -Michael Emperador
 '''
+
 class Node():
+    '''
+    @class Node() - Holds no data on its own, 
+        developed with the intent of being a super class
+        and being inherited. 
+        
+        ***NOTE
+        Whatever inherits this class will be given the support
+        for this data so long as the nametags next and prev are
+        are not taken. 
+        ***
+    '''
     next=None
     prev=None
 
@@ -68,8 +80,6 @@ class placeHolder():
 
 
 class smallSignals(placeHolder):
-    #Add self managing placeholder 
-    #Add loop support 
 
     def __init__(self, kwargs):
         self.signals = [0] * 5
@@ -80,6 +90,7 @@ class smallSignals(placeHolder):
         self.isWaiting = 0
         self.sleepTime = 0
         self.timeOfSleep = 0
+        self.taskVars = list()
 
         super().__init__()
         if kwargs:
@@ -172,40 +183,69 @@ class smallSignals(placeHolder):
         self.isSleep = 0
         return
 
+
     def checkSleep(self):
         if self.isSleep == 1:
-            if self.sleepTime == -1:
-                return False
+            if self.sleepTime == -1: return -1
+
             if time.time() - self.timeOfSleep >= self.sleepTime:
                 self.isReady = 1
                 self.isSleep = 0
-                return True
+                return self.priority
             else: 
-                return False
+                return -1
+        else: 
+            return -1
 
 
     def sigSuspendV2(self,OS, *argv):
-        #sig is assumed 1
+        '''
+        @function sigSuspendV2() - Suspends the task until the corresponding 
+            signal is recieved. Then the thread is revisited in the next
+            getPlace() code block. 
+        @param OS - smallOS - OS object that manages tasks.
+        @param argv - variables to be saved when the next placeholder
+            is executed. 
+        @return - void
+
+        '''
         self.saveState(argv)
+        #sig is assumed 1
         self.wakeSigs.append(1)
         self.isWaiting = 1
         self.isReady = 0
         self.setPlaceholder()
-        # OS.wait(self)
-        return 1
+        return 
 
 
     def saveState(self,*argv):
+        '''
+        @function saveState() - Saves all the variables passed in
+            to a list that can be retrieved with a getState() function
+            call.
+        @param argv - comma seperated variables to be saved. 
+        @return - void 
+
+        ***NOTE
+            Soon to be deprecated because the state holder will be a dict(). 
+        '''
         args = [x for x in argv]
         if len(args) > 0:
             self.taskVars.extend(args)
         return
     
+
     def getState(self):
+        '''
+        @function getVars() - Retrieves the previous state
+        that was saved.
+        @return - list - of variables saved from previous saveState() call.
+        '''
         if len(self.taskVars) >= 1:
             return self.taskVars[0]
         else:
             return list()
+
 
     def signalHandler(self,OS,task):
         '''
@@ -227,6 +267,12 @@ class smallSignals(placeHolder):
 
 
     def checkSignal(self, sig):
+        '''
+        @function checkSignal() - Checks to see if the signal entered
+            has been recieved. Sets the signal to zero after the signal has been checked.
+        @sig - int - The signal to be checked. 
+        @return - bool - True if the signal was recieved before and False if it was not.
+        '''
         if self.signals[sig] == 1:
             self.signals[sig] = 0
             return True 
@@ -243,8 +289,6 @@ class smallTask(smallSignals, Node):
         information, name, ID number, signals.
     '''
 
-    #Variable state of tasks
-    taskVars = list()
 
     def __init__(self,priority,routine,isReady,**kwargs):
         '''
@@ -276,7 +320,6 @@ class smallTask(smallSignals, Node):
         self.parent = None
         self.placeholder  = 0
         self.updateFunc = None
-        self.taskVars = list()
 
         super().__init__(kwargs)
         Node.__init__(self)
@@ -325,10 +368,6 @@ class smallTask(smallSignals, Node):
             return 0
         else:
             return -1
-
-
-    def getVars(self):
-        return self.taskVars
 
 
     def setID(self, pid):
