@@ -1,7 +1,6 @@
 from numpy import log as ln
 import math 
 import random
-import pdb
 
 
 
@@ -74,6 +73,7 @@ def insert(data,target,l,r,func=None):
 	else:
 		return l
 
+
 def round_up(n, decimals=0): 
 	'''
 	Rounds the value up
@@ -81,6 +81,7 @@ def round_up(n, decimals=0):
 	'''
 	multiplier = 10 ** decimals
 	return math.ceil(n * multiplier) / multiplier
+
 
 def test_search():
 	'''
@@ -122,7 +123,6 @@ def test_insert():
 		print('True')
 
 
-
 if __name__=='__main__':
 
 	LENGTH = 2**12
@@ -134,10 +134,6 @@ if __name__=='__main__':
 	data = list(range(LENGTH))
 
 	count = 0
-
-
-
-			
 
 	test_search()
 	test_insert()
