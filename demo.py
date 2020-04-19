@@ -134,7 +134,7 @@ def execDemo(OS,taskObj):
 
 if __name__ == '__main__':
     #Comment Everything, get rid of unused functions  and make shell more robust
-    #Make demos cleaner, better state saving with dict, Make unittestes, 
+    #Make demos cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
     #work through innerloops
         update21= updater1()
         base = baseShell()
