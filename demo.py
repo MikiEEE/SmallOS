@@ -8,7 +8,7 @@ import time, traceback
 '''
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ FITNESS FOR A PARTICULAR PURPself.OS.E AND NONINFRINGEMENT. IN NO EVENT SHALL THE
  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
@@ -38,104 +38,104 @@ class updater1():
 
 update21= updater1(1)
 
-def forkDemo(OS, taskObj):
+def forkDemo(self):
 
-    if taskObj.pid == 0:
-        if taskObj.getPlace():
+    if self.pid == 0:
+        if self.getPlace():
             vars = list()
             vars.append(1)
-            pids = [OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=taskObj,name=str(x))) for x in range(2**9)]
-            OS.smAppPrint("Adding \n")
-            OS.fork(smallTask(9,forkDemo,1,name='child',parent=taskObj))
-            OS.smAppPrint("PARENT SLEEPING\n")
-            taskObj.sigSuspendV2(OS,1)
-        elif taskObj.getPlace():
-            OS.smAppPrint("PARENT Done \n")
+            pids = [self.OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=self,name=str(x))) for x in range(2**9)]
+            self.OS.smAppPrint("Adding \n")
+            self.OS.fork(smallTask(9,forkDemo,1,name='child',parent=self))
+            self.OS.smAppPrint("PARENT SLEEPING\n")
+            self.sigSuspendV2(1)
+        elif self.getPlace():
+            self.OS.smAppPrint("PARENT Done \n")
 
-    elif taskObj.name == 'child':
-        taskObj.sendSignal(OS,0,1)
+    elif self.name == 'child':
+        self.sendSignal(0,1)
          # pass
     else:
-        taskObj.sendSignal(OS,0,2)
+        self.sendSignal(0,2)
     return 0
 
 
-def handler(OS,taskObj):
-    if taskObj.checkSignal(2):
-        OS.smAppPrint('from:',taskObj.name,'ouch','\n')
+def handler(self):
+    if self.checkSignal(2):
+        self.OS.smAppPrint('from:',self.name,'ouch','\n')
     return 0 
 
 
-def send(OS,taskObj):
-    parent = taskObj.parent
+def send(self):
+    parent = self.parent
     parent = parent.pid
-    OS.smAppPrint("Sending Signal \n")
-    taskObj.sendSignal(OS,parent,1)
+    self.OS.smAppPrint("Sending Signal \n")
+    self.sendSignal(parent,1)
     return 0
 
 
-def pHDemo(OS,taskObj):
-    if taskObj.getPlace():
-        OS.smAppPrint("First Phrase","\n")
-        child = OS.fork(smallTask(8,send,1,parent=taskObj,update=update21, name='sender'))
-        taskObj.sigSuspendV2(OS,child)
+def pHDemo(self):
+    if self.getPlace():
+        self.OS.smAppPrint("First Phrase","\n")
+        child = self.OS.fork(smallTask(8,send,1,parent=self,update=update21, name='sender'))
+        self.sigSuspendV2(child)
 
-    if taskObj.getPlace():
-        OS.smAppPrint("Second \n")
-        taskObj.sigSuspendV2(OS) 
+    if self.getPlace():
+        self.OS.smAppPrint("Second \n")
+        self.sigSuspendV2() 
 
-    if taskObj.getPlace():
-        OS.smAppPrint("third \n")
-        taskObj.sigSuspendV2(OS) 
+    if self.getPlace():
+        self.OS.smAppPrint("third \n")
+        self.sigSuspendV2() 
 
-    if taskObj.getPlace():
-        OS.smAppPrint("fourth \n")
-        pid = taskObj.getState()[0]
-        OS.tasks.delete(pid)
+    if self.getPlace():
+        self.OS.smAppPrint("fourth \n")
+        pid = self.getState()[0]
+        self.OS.tasks.delete(pid)
     return 0
 
 
-def sleepDemo(OS, taskObj):
-    if taskObj.getPlace():
-        OS.smAppPrint("First Phrase","\n")
-        # OS.fork(smallTask(8,send,1,parent=taskObj,update=update21), taskObj)
-        taskObj.sleep(OS,1,3,[5,7,9])
+def sleepDemo( self):
+    if self.getPlace():
+        self.OS.smAppPrint("First Phrase","\n")
+        # self.OS.fork(smallTask(8,send,1,parent=self,update=update21), self)
+        self.sleep(1,3,[5,7,9])
 
-    if taskObj.getPlace():
-        OS.smAppPrint("Second \n")
-        taskObj.sleep(OS,1,4)
+    if self.getPlace():
+        self.OS.smAppPrint("Second \n")
+        self.sleep(1,4)
 
-    if taskObj.getPlace():
-        OS.smAppPrint("third \n")
-        taskObj.sleep(OS,1,5)
+    if self.getPlace():
+        self.OS.smAppPrint("third \n")
+        self.sleep(1,5)
 
-    if taskObj.getPlace():
-        OS.smAppPrint("fourth \n")
+    if self.getPlace():
+        self.OS.smAppPrint("fourth \n")
     return 0
 
 
-def sleepAndSuspendDemo(OS, taskObj):
+def sleepAndSuspendDemo( self):
     print('hello')
-    if taskObj.getPlace():
-        OS.smAppPrint("First Phrase","\n")
-        OS.fork(smallTask(8,send,1,parent=taskObj))
-        taskObj.sigSuspendV2(OS)
+    if self.getPlace():
+        self.OS.smAppPrint("First Phrase","\n")
+        self.OS.fork(smallTask(8,send,1,parent=self))
+        self.sigSuspendV2()
 
-    if taskObj.getPlace():
-        OS.smAppPrint("Second \n")
-        taskObj.sleep(OS,1)
+    if self.getPlace():
+        self.OS.smAppPrint("Second \n")
+        self.sleep(1)
 
-    if taskObj.getPlace():
-        OS.smAppPrint("third \n")
-        # taskObj.sigSuspendV2(OS, 0,1) 
+    if self.getPlace():
+        self.OS.smAppPrint("third \n")
+        # self.sigSuspendV2( 0,1) 
 
-    # if taskObj.getPlace():
-    #     OS.smAppPrint("fourth \n")
+    # if self.getPlace():
+    #     self.OS.smAppPrint("fourth \n")
     return 0
 
 #@task
-def execDemo(OS,taskObj):
-    cmd = '''OS.smAppPrint('HELLO','\\n',taskObj,'\\n')'''
+def execDemo(self):
+    cmd = '''self.OS.smAppPrint('HELLO','\\n',self,'\\n')'''
     cmd = compile(cmd,"demo.py","exec")
     exec(cmd)
     return 0
@@ -143,7 +143,7 @@ def execDemo(OS,taskObj):
 
 if __name__ == '__main__':
     #Comment Everything, get rid of unused functions  and make shell more robust
-    #Make demos cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
+    #Make demself.OS. cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
     #work through innerloops
         update21= updater1()
         base = baseShell()
@@ -156,9 +156,9 @@ if __name__ == '__main__':
 
         tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
         fails = list()
-        #OS.addTasks([demo_1,demo_2,demo_3,demo_4])
-        # OS.addTasks([demo_4])
-        # OS.start()
+        #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])
+        # self.OS.addTasks([demo_4])
+        # self.OS.start()
         for num, demo in enumerate(tasks):
             try:
                 OS.fork(demo)
@@ -171,5 +171,5 @@ if __name__ == '__main__':
             print('ALL DEMOS COMPLETED SUCCESSFULLY')
         else:
             print(fails)
-        # OS.smAppPrint(OS,'\n')
+        # self.OS.smAppPrint('\n')
 

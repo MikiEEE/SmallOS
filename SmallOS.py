@@ -115,7 +115,7 @@ class smallOS(smallIO):
             result = -1   
             
             if cursor.getExeStatus():
-                result = cursor.excecute(self)
+                result = cursor.excecute()
             else:
                 self.tasks.setCatSel(cursor.checkSleep())
             
@@ -145,9 +145,13 @@ class smallOS(smallIO):
             ids = list()
             for item in childern:
                 pid = self.tasks.insert(item)
+                if pid != - 1: 
+                    item.setOS(self)
                 ids.append(pid)
         else:
             ids = self.tasks.insert(children)
+            if ids != -1:
+                children.setOS(self)
         return ids
 
 
