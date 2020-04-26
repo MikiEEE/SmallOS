@@ -16,7 +16,12 @@ from SmallErrors import MaxProcessError
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE.
 '''
-
+class smallKernal():
+    '''
+    This is where the System Call Interface will go. 
+    Example: if you were setting up a a2d module or PWM, put 
+    that in here. 
+    '''
 
 class smallIO():
 
@@ -91,51 +96,15 @@ class smallOS(smallIO):
                     self.shells.append(shells) 
 
 
-    def addTasks(self, newTasks):
-        '''
-        @function addTasks() - takes in a list of tasks
-            and returns the respective ids. (IDS may be out of order)
-        @param newTasks -  list of new smallTask()s to be added and managed
-            by smallOS()
-        @return list() - list of ids. ##May be out of order.
-        '''
-        ids = list()
-        for item in newTasks:
-                pid = self.tasks.insert(item)
-                ids.append(pid)
-        return ids
-
-
-    def addTask(self, newTask):
-        return self.tasks.insert(newTask)
-
-
     def start(self):
         '''
         @function start() - starts the OS
         @return void
         '''
-        print('Starting...\n')
-        control = 1
-        while control == 1:
-            self.runOS()
-            taskNum = len(self.tasks)
-            if taskNum == 0:
-                control = 0
-        return 
-
-
-    def runOS(self):
-        '''
-        @function runOS() - calls the update function and then executes
-            the tasks. In the event of no update function, the Task is deleted after successful
-            completion.
-        @return void 
-        '''
         self.tasks.resetCatSel()
         cursor = self.tasks.pop()
-        while cursor != None:
-            if len(self.tasks) == 0: break
+
+        while len(self.tasks) != 0:
 
             if select.select([sys.stdin,],[],[],0.0)[0]:
                 inpt = sys.stdin.readline()
@@ -144,13 +113,20 @@ class smallOS(smallIO):
 
             update = cursor.update()
             result = -1   
+            
             if cursor.getExeStatus():
                 result = cursor.excecute(self)
             else:
                 self.tasks.setCatSel(cursor.checkSleep())
+            
             if update == -1 and result == 0 and cursor.getDelStatus():
                 self.tasks.delete(cursor.pid)
+
             cursor = self.tasks.pop()
+
+            if cursor == None: 
+                self.tasks.resetCatSel()
+                cursor = self.tasks.pop()
         return
 
 
@@ -166,9 +142,12 @@ class smallOS(smallIO):
              failure returns -1.
         '''
         if isinstance(children,list):
-            ids = self.addTasks(children)
+            ids = list()
+            for item in childern:
+                pid = self.tasks.insert(item)
+                ids.append(pid)
         else:
-            ids = self.addTask(children)
+            ids = self.tasks.insert(children)
         return ids
 
 

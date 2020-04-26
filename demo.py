@@ -3,7 +3,7 @@ from SmallTask import smallTask
 from shells import baseShell
 from SmallErrors import MaxProcessError
 
-import time 
+import time, traceback 
 
 '''
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -161,9 +161,10 @@ if __name__ == '__main__':
         # OS.start()
         for num, demo in enumerate(tasks):
             try:
-                OS.addTask(demo)
+                OS.fork(demo)
                 OS.start()
             except: 
+                print(traceback.format_exc())
                 fails.append(num + 1)
 
         if len(fails) == 0:
