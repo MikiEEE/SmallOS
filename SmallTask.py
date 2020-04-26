@@ -134,7 +134,7 @@ class smallSignals(placeHolder):
     @class smallSignals - Class designed to handle all of the 
         signal oriented interprocess communication. 
     '''
-    def __init__(self, kwargs):
+    def __init__(self,OS, kwargs):
         '''
         @fucntion __init__() - Takes in kwargs and extracts the signal handler
             function. 
@@ -149,8 +149,8 @@ class smallSignals(placeHolder):
         self.isWaiting = 0
         self.sleepTime = 0
         self.timeOfSleep = 0
+        self.OS = OS
         self.taskVars = list()
-
         super().__init__()
         if kwargs:
             if kwargs.get('handlers',False):
@@ -173,7 +173,7 @@ class smallSignals(placeHolder):
         return recieved
 
 
-    def sendSignal(self,OS,pid,sig):
+    def sendSignal(self,pid,sig):
         '''
         @function sendSignal() - Sends signals to a task
             with a specific Process ID.
@@ -185,14 +185,14 @@ class smallSignals(placeHolder):
             and 0 upon success.
         '''
         if sig < len(self.signals) and sig > -1:
-            task = OS.tasks.search(pid)
+            task = self.OS.tasks.search(pid)
             if task == -1: return -1 
-            task.acceptSignal(OS,sig)
+            task.acceptSignal(sig)
             return 0
         return -1
 
 
-    def acceptSignal(self, OS, sig):
+    def acceptSignal(self,sig):
         '''
         @function acceptSignal() - Allows the Task
             to recieve the signal. Makes sure the signal is valid
@@ -206,7 +206,7 @@ class smallSignals(placeHolder):
                                         self.signalHandler,
                                         1, name='handler'
                                         ,parent=self)
-                OS.fork(handlerTask)
+                self.OS.fork(handlerTask)
             if sig in self.wakeSigs:
                 self.isWaiting = 0
                 self.isReady = 1
@@ -216,7 +216,7 @@ class smallSignals(placeHolder):
             return -1
 
 
-    def sleep(self,OS,secs,*args):
+    def sleep(self,secs,*args):
         '''
         @function sleep() -  Suspends process and gives control
             back to the OS until the desired time has passed.
@@ -276,7 +276,7 @@ class smallSignals(placeHolder):
             return -1
 
 
-    def sigSuspendV2(self,OS, *argv):
+    def sigSuspendV2(self, *argv):
         '''
         @function sigSuspendV2() - Suspends the task until the corresponding 
             signal is recieved. Then the thread is revisited in the next
@@ -325,7 +325,7 @@ class smallSignals(placeHolder):
             return list()
 
 
-    def signalHandler(self,OS,task):
+    def signalHandler(self,task):
         '''
         @function signalHandler() - calls the inputed signal handler functions.
             Clears all signals afterwards.
@@ -336,7 +336,7 @@ class smallSignals(placeHolder):
         @return 0 upon success, -1 upon a nonexistent handler.
         '''
         if self.handlers:
-            self.handlers(OS,task.parent)
+            self.handlers(task.parent)
             status = 0
         else:
             self.signals = [0] * 5
@@ -397,12 +397,13 @@ class smallTask(smallSignals, Node):
         self.isReady = isReady
         self.isLocked = 0
         self.parent = None
+        self.OS = None
         self.placeholder  = 0
 
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
 
-        super().__init__(kwargs)
+        super().__init__(self.OS,kwargs)
         Node.__init__(self)
 
         if kwargs:
@@ -415,7 +416,7 @@ class smallTask(smallSignals, Node):
         return
 
 
-    def excecute(self,OS):
+    def excecute(self):
         '''
         @function execute() - Checks to see if the task() is ready
             or locked. If the task() is not locked and ready the routine()
@@ -425,7 +426,7 @@ class smallTask(smallSignals, Node):
         if self.isReady and not self.isLocked:
             self.setUpPlace()
             self.isReady = 0
-            result = self.routine(OS,self)
+            result = self.routine(self)
             return result   
         else:
             return -1
@@ -473,6 +474,8 @@ class smallTask(smallSignals, Node):
         '''
         return self.pid
 
+    def setOS(self, OS):
+        self.OS = OS
 
     def getExeStatus(self):
         '''
