@@ -1,11 +1,15 @@
 import time
 import traceback
 
+
 '''
-The SmallOS project was made entirely for education purposes
-and was made with the intent of being entirely opensource. 
-Enjoy!
--Michael Emperador
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
 '''
 
 class Node():
@@ -37,11 +41,14 @@ class placeHolder():
     @class PlaceHolder() - Maintains the positional state of a process 
         in the event of something similar to a sleep() or sigSuspendV2() call.
     '''
-
+    ##THIS IS WHERE I WOULD ADD LOOP SUPPORT 
     def __init__(self):
-
+        '''
+        @function __init__() - Sets up initial variables for 
+            loop control. 
+        @return - void.
+        '''
         self.placeholder = 0 
-        self.lastPlaceHolder = 0 
         self.timeKeeper = 0
         self.incrementor = 0
         self.isUsed = False
@@ -49,6 +56,21 @@ class placeHolder():
 
 
     def getPlace(self):
+        '''
+        @function getPlace() - Used to determine which branch 
+            to be gone into based off of where the last sigSuspendV2() 
+            call was.
+        @return boolean - True If this is the correct branch. 
+            False if it is not the correct branch.
+
+        ***NOTE-Typically used in the actual Task code. 
+
+            if task.getPlace():
+                do something
+                task.sigSupendV2()
+            if task.getPlace():
+                do something else
+        '''
         if self.isUsed == True:
             return False
 
@@ -61,21 +83,45 @@ class placeHolder():
 
 
     def setUpPlace(self):
+        '''
+        @function setUpPlace() - Sets up the IsUsed Variable so
+            that the correct branch and only that branch can be used. 
+        @return void
+        '''
         self.isUsed = False
         return
 
 
     def setPlaceholder(self):
+        '''
+        @function setsup the placeholder to know which branch
+            to go into next. 
+        @return void.
+        '''
+
+        #This function in particular is where the loop support
+        #will be added.
+
         self.incrementor += 1
         self.timeKeeper = self.incrementor
         return 
 
 
     def getPlaceholder(self):
+        '''
+        @function getPlaceholder - (Deprecated) - retrieves the placeholder 
+            number.
+        @return - int() - returns the placholder number.
+        '''
         return self.placeholder
 
 
     def placeHolderReset(self):
+        '''
+        @function placeHolderReset -(Depriecated) - Resets the 
+            placeholder. 
+        @return void.
+        '''
         self.placeholder = 0
         return
 
@@ -352,6 +398,8 @@ class smallTask(smallSignals, Node):
         self.isLocked = 0
         self.parent = None
         self.placeholder  = 0
+
+        #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
 
         super().__init__(kwargs)
@@ -372,7 +420,7 @@ class smallTask(smallSignals, Node):
         @function execute() - Checks to see if the task() is ready
             or locked. If the task() is not locked and ready the routine()
             function is executed.
-        @return void
+        @return - int - the result of the routine. 0 executed | -1 not executed
         '''
         if self.isReady and not self.isLocked:
             self.setUpPlace()

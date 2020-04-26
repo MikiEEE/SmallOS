@@ -74,6 +74,9 @@ def insert(data,target,l,r,func=None):
 		return l
 
 
+
+
+
 def round_up(n, decimals=0): 
 	'''
 	Rounds the value up
