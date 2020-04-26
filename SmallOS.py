@@ -5,14 +5,17 @@ import select
 
 from OSlist import OSList
 from SmallErrors import MaxProcessError
-'''
-The SmallOS project was made entirely for education purposes
-and was made with the intent of being entirely opensource. 
-Enjoy!
--Michael Emperador
-'''
 
 
+'''
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ SOFTWARE.
+'''
 
 
 class smallIO():
@@ -145,12 +148,9 @@ class smallOS(smallIO):
                 result = cursor.excecute(self)
             else:
                 self.tasks.setCatSel(cursor.checkSleep())
-
             if update == -1 and result == 0 and cursor.getDelStatus():
                 self.tasks.delete(cursor.pid)
             cursor = self.tasks.pop()
-            
-            # time.sleep(.4)
         return
 
 
