@@ -1,3 +1,0 @@
-
-class MaxProcessError(Exception):
-	pass
