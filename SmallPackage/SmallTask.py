@@ -1,6 +1,6 @@
 import time
 import traceback
-
+from .list_util.linkedList import Node
 
 '''
  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -11,29 +11,6 @@ import traceback
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE.
 '''
-
-class Node():
-    '''
-    @class Node() - Holds no data on its own, 
-        developed with the intent of being a super class
-        and being inherited. 
-        
-        ***NOTE
-        Whatever inherits this class will be given the support
-        for this data so long as the nametags next and prev are
-        are not taken. 
-        ***
-    '''
-    next=None
-    prev=None
-
-    def __init__(self):
-        self.next = None
-        self.prev = None 
-        return 
-
-
-
 
 
 class placeHolder():
