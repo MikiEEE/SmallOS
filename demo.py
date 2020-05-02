@@ -141,8 +141,8 @@ def execDemo(self):
 
 
 if __name__ == '__main__':
-    #Comment Everything, get rid of unused functions  and make shell more robust
-    #Make demself.OS. cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
+    #and make shell more robust, Describe each demo,
+    #Make cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
     #work through innerloops
         update21= updater1()
         base = baseShell()
