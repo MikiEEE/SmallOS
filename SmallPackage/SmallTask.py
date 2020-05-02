@@ -126,6 +126,10 @@ class smallTask(smallSignals, Node):
 
 
     def build(self,priority,task,ready,name='',parent=None):
+            '''
+            @function build - lets the smallsignal class create smallTasks. 
+            @return - smallTask() 
+            '''
             task = smallTask(priority,task,
                             ready, name=name,
                             parent=parent)

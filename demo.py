@@ -132,8 +132,8 @@ def execDemo(self):
 
 
 if __name__ == '__main__':
-    #and make shell more robust, Describe each demo,
-    #Make cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
+    #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
+    #Make cleaner, better state saving with dict, add adjustable signal lengths, Make unittestes, Turn Shell into own process
     #work through innerloops, make time in smallSignals replaceable with another timing mechanism from kernal.
         update21= updater1()
         base = baseShell()
