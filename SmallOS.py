@@ -16,6 +16,11 @@ from SmallErrors import MaxProcessError
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  SOFTWARE.
 '''
+
+
+
+
+
 class smallKernal():
     '''
     This is where the System Call Interface will go. 
@@ -23,15 +28,42 @@ class smallKernal():
     that in here. 
     '''
 
-class smallIO():
+    def __init__(self):
+        pass
 
+
+
+
+
+
+class smallIO():
+    '''
+    @class smallIO() - controls print Input-Output 
+
+    ***NOTE***
+    This will probably be moved into the kernal class as a variable. 
+    And will most likley be piped into the different processes on a terminal
+    selection basis.
+
+    TODO: Turn appPrintQueue into a circular buffer.
+    '''
 
     def __init__(self):
+        '''
+        @fucntion __init__() - sets up the terminal toggle 
+             and printqueuing veriables. 
+        '''
         self.terminalToggle = False
         self.appPrintQueue = list()
+        return 
 
 
-    def smAppPrint(self, *args):
+    def print(self, *args):
+        '''
+        @function print() - Prints output to terminal for application display.
+        @param *args - takes in arguments, does not automatically add newline.
+        @return - void.
+        '''
         msg = ''.join([str(arg) for arg in args])
         if self.terminalToggle == False:
             sys.stdout.write(msg) 
@@ -44,7 +76,12 @@ class smallIO():
         return
 
 
-    def smShellPrint(self, *args):
+    def sPrint(self, *args):
+        '''
+        @function sPrint() - Prints output to terminal for OS-related display.
+        @param *args - takes in arguments, does not automatically add newline.
+        @return - void.
+        '''
         if self.terminalToggle == True:
             msg = ''.join([str(arg) for arg in args])
             sys.stdout.write(msg) 
@@ -53,6 +90,11 @@ class smallIO():
 
 
     def toggleTerminal(self):
+        '''
+        @function toggleTerminal() - Toggles the terminal from displaying application output
+            to OS command output and vice-versa.
+        @return - void.
+        '''
         self.terminalToggle = not self.terminalToggle
         msg = ''.join('*' for x in range(16)) + '\n'
         sys.stdout.write(msg) 
@@ -60,7 +102,7 @@ class smallIO():
         if self.terminalToggle == False:
             for num in range(len(self.appPrintQueue)):
                 msg = self.appPrintQueue.pop(0)
-                self.smAppPrint(msg)
+                self.print(msg)
         return 
 
 
@@ -128,11 +170,6 @@ class smallOS(smallIO):
                 self.tasks.resetCatSel()
                 cursor = self.tasks.pop()
         return
-
-
-    def deleteTask(self, pid):
-        self.tasks.delete(pid)
-        return 
 
 
     def fork(self,children):
