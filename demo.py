@@ -1,7 +1,6 @@
 from SmallOS import smallOS
-from SmallTask import smallTask
+from SmallPackage.SmallTask import smallTask
 from shells import baseShell
-from SmallErrors import MaxProcessError
 
 import time, traceback 
 

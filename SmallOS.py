@@ -3,8 +3,8 @@ import sys
 import traceback
 import select
 
-from OSlist import OSList
-from SmallErrors import MaxProcessError
+from SmallPackage.OSlist import OSList
+from SmallPackage.SmallErrors import MaxProcessError
 
 
 '''
