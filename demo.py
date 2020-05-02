@@ -45,12 +45,12 @@ def forkDemo(self):
             vars = list()
             vars.append(1)
             pids = [self.OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=self,name=str(x))) for x in range(2**9)]
-            self.OS.smAppPrint("Adding \n")
+            self.OS.print("Adding \n")
             self.OS.fork(smallTask(9,forkDemo,1,name='child',parent=self))
-            self.OS.smAppPrint("PARENT SLEEPING\n")
+            self.OS.print("PARENT SLEEPING\n")
             self.sigSuspendV2(1)
         elif self.getPlace():
-            self.OS.smAppPrint("PARENT Done \n")
+            self.OS.print("PARENT Done \n")
 
     elif self.name == 'child':
         self.sendSignal(0,1)
@@ -62,34 +62,34 @@ def forkDemo(self):
 
 def handler(self):
     if self.checkSignal(2):
-        self.OS.smAppPrint('from:',self.name,'ouch','\n')
+        self.OS.print('from:',self.name,'ouch','\n')
     return 0 
 
 
 def send(self):
     parent = self.parent
     parent = parent.pid
-    self.OS.smAppPrint("Sending Signal \n")
+    self.OS.print("Sending Signal \n")
     self.sendSignal(parent,1)
     return 0
 
 
 def pHDemo(self):
     if self.getPlace():
-        self.OS.smAppPrint("First Phrase","\n")
+        self.OS.print("First Phrase","\n")
         child = self.OS.fork(smallTask(8,send,1,parent=self,update=update21, name='sender'))
         self.sigSuspendV2(child)
 
     if self.getPlace():
-        self.OS.smAppPrint("Second \n")
+        self.OS.print("Second \n")
         self.sigSuspendV2() 
 
     if self.getPlace():
-        self.OS.smAppPrint("third \n")
+        self.OS.print("third \n")
         self.sigSuspendV2() 
 
     if self.getPlace():
-        self.OS.smAppPrint("fourth \n")
+        self.OS.print("fourth \n")
         pid = self.getState()[0]
         self.OS.tasks.delete(pid)
     return 0
@@ -97,45 +97,45 @@ def pHDemo(self):
 
 def sleepDemo( self):
     if self.getPlace():
-        self.OS.smAppPrint("First Phrase","\n")
+        self.OS.print("First Phrase","\n")
         # self.OS.fork(smallTask(8,send,1,parent=self,update=update21), self)
         self.sleep(1,3,[5,7,9])
 
     if self.getPlace():
-        self.OS.smAppPrint("Second \n")
+        self.OS.print("Second \n")
         self.sleep(1,4)
 
     if self.getPlace():
-        self.OS.smAppPrint("third \n")
+        self.OS.print("third \n")
         self.sleep(1,5)
 
     if self.getPlace():
-        self.OS.smAppPrint("fourth \n")
+        self.OS.print("fourth \n")
     return 0
 
 
 def sleepAndSuspendDemo( self):
     print('hello')
     if self.getPlace():
-        self.OS.smAppPrint("First Phrase","\n")
+        self.OS.print("First Phrase","\n")
         self.OS.fork(smallTask(8,send,1,parent=self))
         self.sigSuspendV2()
 
     if self.getPlace():
-        self.OS.smAppPrint("Second \n")
+        self.OS.print("Second \n")
         self.sleep(1)
 
     if self.getPlace():
-        self.OS.smAppPrint("third \n")
+        self.OS.print("third \n")
         # self.sigSuspendV2( 0,1) 
 
     # if self.getPlace():
-    #     self.OS.smAppPrint("fourth \n")
+    #     self.OS.print("fourth \n")
     return 0
 
 #@task
 def execDemo(self):
-    cmd = '''self.OS.smAppPrint('HELLO','\\n',self,'\\n')'''
+    cmd = '''self.OS.print('HELLO','\\n',self,'\\n')'''
     cmd = compile(cmd,"demo.py","exec")
     exec(cmd)
     return 0
@@ -171,5 +171,5 @@ if __name__ == '__main__':
             print('ALL DEMOS COMPLETED SUCCESSFULLY')
         else:
             print(fails)
-        # self.OS.smAppPrint('\n')
+        # self.OS.print('\n')
 
