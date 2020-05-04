@@ -1,6 +1,11 @@
-from .placeHolder import placeHolder
-
 import time
+
+
+try:
+    from .placeHolder import placeHolder
+except:
+    from placeHolder import placeHolder
+
 
 
 class smallSignals(placeHolder):
@@ -232,4 +237,3 @@ class smallSignals(placeHolder):
             return False
 
 
- 
