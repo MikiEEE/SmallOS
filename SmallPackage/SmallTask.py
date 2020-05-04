@@ -1,8 +1,12 @@
 import time
 import traceback
 
-from .smallSignals import smallSignals
-from .list_util.linkedList import Node
+try:
+    from .smallSignals import smallSignals
+    from .list_util.linkedList import Node
+except:
+    from smallSignals import smallSignals
+    from list_util.linkedList import Node   
 
 
 class smallTask(smallSignals, Node):

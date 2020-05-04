@@ -1,7 +1,9 @@
-from .SmallTask import smallTask
 
-from .list_util.linkedList import insertNext, removeNode
-from .list_util.binSearchList import insert, search
+if __name__ != '__main__':
+    from .SmallTask import smallTask
+
+    from .list_util.linkedList import insertNext, removeNode
+    from .list_util.binSearchList import insert, search
 
 import time
 
@@ -114,6 +116,11 @@ class OSList(smallPID):
         @function setCatSel() - when a valid higher priority task is
             added to the tasklist the next self.pop() result will be set to 
             look to that higher priority rather then the previous next element. 
+
+            ***Note***
+            Accomplishes this by seting current to None so when pop() is called
+            it looks for the next available category.
+        
         @param newSel - the priority of the new task. 
         @return - int - 0 on a valid priority and -1 on an invalid priority. 
         '''
@@ -227,11 +234,23 @@ class OSList(smallPID):
         length = len(self.tasks)
         index = search(self.tasks,pid,0,length,self.func)
         if index == -1: return -1
+
         removeNode(self.tasks[index])
+        # priority = self.tasks[index].priority
+        
+        # if self.cats[priority].pid == self.tasks[index]:
+
+
         del self.tasks[index]
         self.freePID(pid)
         return 0
 
+    def list(self):
+        '''
+        @function list() - returns a list of all of the tasks
+            in the OSlist.
+        '''
+        return [task for task in self.tasks]
 
     def __len__(self):
         '''
@@ -253,20 +272,31 @@ class OSList(smallPID):
 
 
 if __name__ == '__main__':
+    from SmallTask import smallTask
+
+    from list_util.linkedList import insertNext, removeNode
+    from list_util.binSearchList import insert, search
+
     tasks = OSList(10)
 
     secs = time.time()
-    for x in range(2**6):
-        tasks.insert(smallTask(x % 10,None,1, name=str(x)))
-    print(time.time() - secs)
+    # for x in range(2**6):
+    #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
+    pid1 = tasks.insert(smallTask(1,None,1, name=str(1)))
+    pid2 = tasks.insert(smallTask(1,None,1, name=str(2)))
 
-    print(tasks)
 
-    print([x.priority for x in tasks.cats[0:4]])
-    cursor = tasks.pop()
-    while cursor != None:
-        cursor.isReady = 0
-        print(cursor.name, cursor.getID(), cursor.priority)
-        cursor = tasks.pop()
+    print(tasks.cats[1])
 
-    print(len(tasks))
+    tasks.delete(0)
+
+    print(tasks.cats[1])
+
+    # print([x.priority for x in tasks.cats[0:4]])
+    # cursor = tasks.pop()
+    # while cursor != None:
+    #     cursor.isReady = 0
+    #     print(cursor.name, cursor.getID(), cursor.priority)
+    #     cursor = tasks.pop()
+
+    # print(len(tasks))
