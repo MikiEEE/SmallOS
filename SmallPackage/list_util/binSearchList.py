@@ -22,6 +22,8 @@ def search(data,target,l,r, func=None):
 
 	@return - int - the index where the element should be added.
 	'''
+	if l < 0 or r > len(data): raise IndexError
+
 	if func == None:
 		func = lambda dat,index: dat[index]
 
@@ -57,6 +59,8 @@ def insert(data,target,l,r,func=None):
 
 	@return - int - the index where the element should be added.
 	'''
+	if l < 0 or r > len(data): raise IndexError
+	
 	if func == None:
 		func = lambda dat,index: dat[index]
 
