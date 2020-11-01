@@ -51,7 +51,7 @@ class smallTask(smallSignals, Node):
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
 
-        super().__init__(self.OS,kwargs)
+        smallSignals.__init__(self,self.OS,kwargs)
         Node.__init__(self)
 
         if kwargs:
@@ -71,6 +71,7 @@ class smallTask(smallSignals, Node):
             function is executed.
         @return - int - the result of the routine. 0 executed | -1 not executed
         '''
+        if not self.routine: return 0
         if self.isReady and not self.isLocked:
             self.setUpPlace()
             self.isReady = 0

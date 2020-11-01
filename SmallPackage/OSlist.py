@@ -1,21 +1,15 @@
 
-if __name__ != '__main__':
+try:
     from .SmallTask import smallTask
-
     from .list_util.linkedList import insertNext, removeNode
     from .list_util.binSearchList import insert, search
+except:
+    from SmallTask import smallTask
+    from list_util.linkedList import insertNext, removeNode
+    from list_util.binSearchList import insert, search
 
 import time
 
-'''
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- SOFTWARE.
-'''
 
 
 class smallPID():
@@ -236,10 +230,10 @@ class OSList(smallPID):
         if index == -1: return -1
 
         removeNode(self.tasks[index])
-        # priority = self.tasks[index].priority
-        
-        # if self.cats[priority].pid == self.tasks[index]:
+        priority = self.tasks[index].priority
 
+        if self.cats[priority].getID() == self.tasks[index].getID():
+            self.cats[priority] = self.cats[priority].next
 
         del self.tasks[index]
         self.freePID(pid)
@@ -272,10 +266,7 @@ class OSList(smallPID):
 
 
 if __name__ == '__main__':
-    from SmallTask import smallTask
 
-    from list_util.linkedList import insertNext, removeNode
-    from list_util.binSearchList import insert, search
 
     tasks = OSList(10)
 
@@ -284,14 +275,20 @@ if __name__ == '__main__':
     #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
     pid1 = tasks.insert(smallTask(1,None,1, name=str(1)))
     pid2 = tasks.insert(smallTask(1,None,1, name=str(2)))
+    pid3 = tasks.insert(smallTask(1,None,1, name=str(3)))
 
-
-    print(tasks.cats[1])
+    print(tasks.cats[1],'\n#')
 
     tasks.delete(0)
 
-    print(tasks.cats[1])
+    print(tasks.cats[1].next,'\n#')
 
+    tasks.delete(2)
+
+    pid2 = tasks.insert(smallTask(1,None,1, name=str(2)))
+    pid3 = tasks.insert(smallTask(1,None,1, name=str(3)))
+
+    print(tasks.cats[1])
     # print([x.priority for x in tasks.cats[0:4]])
     # cursor = tasks.pop()
     # while cursor != None:
