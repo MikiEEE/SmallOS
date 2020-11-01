@@ -134,7 +134,7 @@ class smallSignals(placeHolder):
         if the correct amount of time has passed then the task is woken back up. 
         
         @return - int - Task PID on successful wake up,
-        -1 if in INDEFINITE till sig wake mode, 
+        -1 if in INDEFINITE sleep till signal handler wakes mode, 
         -1 if time constraint has not been met yet, 
         -1 if the task isn't sleep.
         

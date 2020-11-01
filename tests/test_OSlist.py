@@ -1,4 +1,4 @@
-import unittest, os, sys, time
+import unittest, os, sys, time, copy
 
 sys.path.append('..')
 
@@ -14,11 +14,20 @@ class test_OSlist(unittest.TestCase):
 		for x in range(2**8):
 			tasks.insert(smallTask(x % 10,None,1, name=str(x)))
 		self.assertEqual([x for x in range(256)], [x.pid for x in tasks.list()])
-		return 
 		
 
 	def test__popOrder(self):
-		pass
+		result = list()
+		current = tasks.pop()
+		while current != None:
+			result.append(current.priority)
+			current.execute()
+			print(current)
+			current = tasks.pop()
+		sort = copy.deepcopy(result)
+		sort = sorted(sort, key=lambda x: x.priority)
+		self.assertEqual(result,sort)
+
 
 	def test_searchFound(self):
 		pass
