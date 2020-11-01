@@ -4,15 +4,6 @@ from shells import baseShell
 
 import time, traceback 
 
-'''
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPself.OS.E AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- SOFTWARE.
-'''
 
 class updater1():
     times = list()
@@ -141,9 +132,9 @@ def execDemo(self):
 
 
 if __name__ == '__main__':
-    #and make shell more robust, Describe each demo,
-    #Make cleaner, better state saving with dict, Make unittestes, Turn Shell into own process
-    #work through innerloops
+    #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
+    #Make cleaner, better state saving with dict, add adjustable signal lengths, Make unittestes, Turn Shell into own process
+    #work through innerloops, make time in smallSignals replaceable with another timing mechanism from kernal.
         update21= updater1()
         base = baseShell()
         demo_1 = smallTask(1,forkDemo,1,name='Parent1', handlers=handler)
