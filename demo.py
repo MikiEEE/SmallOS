@@ -1,7 +1,7 @@
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
+from SmallPackage.Kernel import Unix
 from shells import baseShell
-
 import time, traceback 
 
 
@@ -135,8 +135,8 @@ def execDemo(self):
 
 if __name__ == '__main__':
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
-    #Make cleaner, add adjustable signal lengths, Make unittestes, Turn Shell into own process
-    #work through innerloops, make time in SmallSignals replaceable with another timing mechanism from kernal.
+    #Make cleaner, add adjustable signal lengths, Turn Shell into own process
+    #work through innerloops.
         update21= updater1()
         base = baseShell()
         demo_1 = SmallTask(1,forkDemo,1,name='Parent1', handlers=handler)
@@ -145,6 +145,8 @@ if __name__ == '__main__':
         demo_4 = SmallTask(1,sleepAndSuspendDemo,1, name='Parent')
         demo_5 = SmallTask(1,execDemo,1, name='Parent')
         OS = SmallOS(shells=base)
+
+        OS.setKernel(Unix())
 
         tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
         fails = list()
