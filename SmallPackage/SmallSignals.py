@@ -1,4 +1,4 @@
-import time
+
 
 
 
@@ -111,7 +111,7 @@ class SmallSignals(placeHolder):
         if secs == -1:
             self.sleepTime = -1
         else:
-            self.timeOfSleep = time.time()
+            self.timeOfSleep = self.OS.kernel.time_epoch()
             self.sleepTime = secs
         return 0
 
@@ -143,7 +143,7 @@ class SmallSignals(placeHolder):
         if self.isSleep == 1:
             if self.sleepTime == -1: return -1
 
-            if time.time() - self.timeOfSleep >= self.sleepTime:
+            if self.OS.kernel.time_epoch() - self.timeOfSleep >= self.sleepTime:
                 self.isReady = 1
                 self.isSleep = 0
                 return self.priority
