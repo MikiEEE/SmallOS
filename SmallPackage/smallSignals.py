@@ -1,14 +1,12 @@
 import time
 
 
-try:
-    from .placeHolder import placeHolder
-except:
-    from placeHolder import placeHolder
+
+from .placeHolder import placeHolder
 
 
 
-class smallSignals(placeHolder):
+class SmallSignals(placeHolder):
     '''
     @class smallSignals - Class designed to handle all of the 
         signal oriented interprocess communication. 
@@ -19,16 +17,14 @@ class smallSignals(placeHolder):
             function. 
         '''
 
-        #Need to add adjustable signals.
+        #Need to add adjustable signal length of signal vector.
         self.signals = [0] * 32
         self.isWaiting = 0
         self.isSleep = 0
         self.wakeSigs = list()
         self.handlerVars = list()
-        self.isWaiting = 0
         self.sleepTime = 0
         self.timeOfSleep = 0
-        self.OS = OS
         self.taskVars = list()
         super().__init__()
         if kwargs:
@@ -95,7 +91,7 @@ class smallSignals(placeHolder):
             return -1
 
 
-    def sleep(self,secs,*args):
+    def sleep(self,secs,state_blob=None):
         '''
         @function sleep() -  Suspends process and gives control
             back to the OS until the desired time has passed.
@@ -103,11 +99,13 @@ class smallSignals(placeHolder):
             all task information.
         @param secs - atleast the number of seconds for the task to be 
             sleep.
-            *NOTE* Insert Negative one to wake up task in signal Handler with custom
-                        Signal.
+            **NOTE** Insert Negative one (-1) for secs to wake up task in signal Handler with custom
+                        Signal handler. 
+                    Insert  0 to just interrupt the process for this instant.
         @return 0 upon success, -1 upon an error.
         '''
-        self.saveState(0, args)
+        if state_blob != None:
+            self.state.update(state_blob)
         self.setPlaceholder()
         self.isSleep = 1
         if secs == -1:
@@ -155,53 +153,25 @@ class smallSignals(placeHolder):
             return -1
 
 
-    def sigSuspendV2(self, *argv):
+    def sigSuspendV2(self,sig,state_blob=None):
         '''
         @function sigSuspendV2() - Suspends the task until the corresponding 
             signal is recieved. Then the thread is revisited in the next
             getPlace() code block. 
         @param OS - smallOS - OS object that manages tasks.
-        @param argv - variables to be saved when the next placeholder
+        @param state_blob - dict - variables to be saved when the next placeholder
             is executed. 
         @return - void
 
         '''
-        self.saveState(argv)
+        if state_blob != None:
+            self.state.update(state_blob)
         #sig is assumed 1
-        self.wakeSigs.append(1)
+        self.wakeSigs.append(sig)
         self.isWaiting = 1
         self.isReady = 0
         self.setPlaceholder()
         return 
-
-
-    def saveState(self,*argv):
-        '''
-        @function saveState() - Saves all the variables passed in
-            to a list that can be retrieved with a getState() function
-            call.
-        @param argv - comma seperated variables to be saved. 
-        @return - void 
-
-        ***NOTE
-            Soon to be deprecated because the state holder will be a dict(). 
-        '''
-        args = [x for x in argv]
-        if len(args) > 0:
-            self.taskVars.extend(args)
-        return
-    
-
-    def getState(self):
-        '''
-        @function getVars() - Retrieves the previous state
-        that was saved.
-        @return - list - of variables saved from previous saveState() call.
-        '''
-        if len(self.taskVars) >= 1:
-            return self.taskVars[0]
-        else:
-            return list()
 
 
     def signalHandler(self,task):
