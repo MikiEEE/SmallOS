@@ -3,12 +3,12 @@ import sys
 import traceback
 import select
 
-from SmallPackage.OSlist import OSList
-from SmallPackage.SmallErrors import MaxProcessError
+from .OSlist import OSList
+from .SmallErrors import MaxProcessError
 
 
 
-class smallKernal():
+class SmallKernal():
     '''
     This is where the System Call Interface will go. 
     Example: if you were setting up a a2d module or PWM, put 
@@ -23,7 +23,7 @@ class smallKernal():
 
 
 
-class smallIO():
+class SmallIO():
     '''
     @class smallIO() - controls print Input-Output 
 
@@ -94,7 +94,12 @@ class smallIO():
 
 
 
-class smallOS(smallIO):
+
+
+
+
+
+class SmallOS(SmallIO):
     '''
     @class - smallOS() - operating system api that manages and runs
         smallTasks()
@@ -112,7 +117,7 @@ class smallOS(smallIO):
         self.wakeUpdate = list()
         self.shells = list()
         self.tasks = OSList(10,size)
-        smallIO.__init__(self)
+        SmallIO.__init__(self)
         if kwargs:
             if kwargs.get('tasks',False):
                 tasks = kwargs['tasks']
