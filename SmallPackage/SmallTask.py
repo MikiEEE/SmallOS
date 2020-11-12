@@ -1,15 +1,13 @@
 import time
 import traceback
 
-try:
-    from .smallSignals import smallSignals
-    from .list_util.linkedList import Node
-except:
-    from smallSignals import smallSignals
-    from list_util.linkedList import Node   
+from .SmallErrors import PIDError
+from .SmallSignals import SmallSignals
+from .list_util.linkedList import Node
+from .taskState import taskState
 
 
-class smallTask(smallSignals, Node):
+class SmallTask(SmallSignals, Node):
     '''
     @Class smallTask() - Object that contains Tasks contents: The routine,
         information, name, ID number, signals and other functions that tasks
@@ -39,7 +37,7 @@ class smallTask(smallSignals, Node):
                 recieved.
             @arg parent - task() - parent task that spawned this current task
         '''
-        self.pid =  0
+        self.pid =  -1
         self.priority = priority
         self.routine = routine
         self.isReady = isReady
@@ -47,12 +45,14 @@ class smallTask(smallSignals, Node):
         self.parent = None
         self.OS = None
         self.placeholder  = 0
+        self.state = taskState()
 
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
 
-        smallSignals.__init__(self,self.OS,kwargs)
+        SmallSignals.__init__(self,self.OS,kwargs)
         Node.__init__(self)
+        taskState.__init__(self)
 
         if kwargs:
             if kwargs.get('name',False):
@@ -108,8 +108,12 @@ class smallTask(smallSignals, Node):
             of the task.
         @return void
         '''
+
         if isinstance(pid,int):
-            self.pid = pid
+            if self.pid == -1:
+                self.pid = pid
+            else:
+                raise PIDError('PID can only be set once.')
         else:
             traceback.format_exc()
             raise TypeError('PID must be type Int')
@@ -123,6 +127,7 @@ class smallTask(smallSignals, Node):
         '''
         return self.pid
 
+
     def setOS(self, OS):
         '''
         @function setOS - sets the object's OS to the current OS.
@@ -135,7 +140,7 @@ class smallTask(smallSignals, Node):
             @function build - lets the smallsignal class create smallTasks. 
             @return - smallTask() 
             '''
-            task = smallTask(priority,task,
+            task = SmallTask(priority,task,
                             ready, name=name,
                             parent=parent)
             return task

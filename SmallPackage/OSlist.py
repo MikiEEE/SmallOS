@@ -1,12 +1,9 @@
 
-try:
-    from .SmallTask import smallTask
-    from .list_util.linkedList import insertNext, removeNode
-    from .list_util.binSearchList import insert, search
-except:
-    from SmallTask import smallTask
-    from list_util.linkedList import insertNext, removeNode
-    from list_util.binSearchList import insert, search
+
+from .SmallTask import SmallTask
+from .list_util.linkedList import insertNext, removeNode
+from .list_util.binSearchList import insert, search
+
 
 import time
 
@@ -193,11 +190,15 @@ class OSList(smallPID):
             index = insert(self.tasks,pid,0,length,func=self.func)
             self.tasks.insert(index, task)
 
+            #If there is no task with that priority make it the head of the 
+            #list node. Otherwise add it onto the list sorted by priority.
             if self.cats[priority] == None:
                 self.cats[priority] = self.tasks[index]
             else:
                 insertNext(self.cats[priority],task)
 
+            #If a higher priority task is added then the current running 
+            # priority it will be set.
             self.setCatSel(priority)
             return pid
         return -1
@@ -239,12 +240,14 @@ class OSList(smallPID):
         self.freePID(pid)
         return 0
 
+
     def list(self):
         '''
         @function list() - returns a list of all of the tasks
             in the OSlist.
         '''
         return [task for task in self.tasks]
+
 
     def __len__(self):
         '''

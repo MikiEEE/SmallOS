@@ -1,5 +1,5 @@
-from SmallOS import smallOS
-from SmallPackage.SmallTask import smallTask
+from SmallPackage.SmallOS import SmallOS
+from SmallPackage.SmallTask import SmallTask
 from shells import baseShell
 
 import time, traceback 
@@ -34,9 +34,9 @@ def forkDemo(self):
         if self.getPlace():
             vars = list()
             vars.append(1)
-            pids = [self.OS.fork(smallTask(x%7+ 1,forkDemo,1,parent=self,name=str(x))) for x in range(2**9)]
+            pids = [self.OS.fork(SmallTask(x%7+ 1,forkDemo,1,parent=self,name=str(x))) for x in range(2**9)]
             self.OS.print("Adding \n")
-            self.OS.fork(smallTask(9,forkDemo,1,name='child',parent=self))
+            self.OS.fork(SmallTask(9,forkDemo,1,name='child',parent=self))
             self.OS.print("PARENT SLEEPING\n")
             self.sigSuspendV2(1)
         elif self.getPlace():
@@ -65,22 +65,23 @@ def send(self):
 
 
 def pHDemo(self):
+
     if self.getPlace():
         self.OS.print("First Phrase","\n")
-        child = self.OS.fork(smallTask(8,send,1,parent=self,update=update21, name='sender'))
-        self.sigSuspendV2(child)
+        child = self.OS.fork(SmallTask(8,send,1,parent=self,update=update21, name='sender'))
+        self.sigSuspendV2(1,{'child':child})
 
     if self.getPlace():
         self.OS.print("Second \n")
-        self.sigSuspendV2() 
+        self.sigSuspendV2(1) 
 
     if self.getPlace():
         self.OS.print("third \n")
-        self.sigSuspendV2() 
+        self.sigSuspendV2(1) 
 
     if self.getPlace():
         self.OS.print("fourth \n")
-        pid = self.getState()[0]
+        pid = self.state.getState('child')
         self.OS.tasks.delete(pid)
     return 0
 
@@ -88,16 +89,17 @@ def pHDemo(self):
 def sleepDemo( self):
     if self.getPlace():
         self.OS.print("First Phrase","\n")
-        # self.OS.fork(smallTask(8,send,1,parent=self,update=update21), self)
-        self.sleep(1,3,[5,7,9])
+        # self.OS.fork(SmallTask(8,send,1,parent=self,update=update21), self)
+        nums = [1,3,[5,7,9]]
+        self.sleep(0,{'nums':nums})
 
     if self.getPlace():
         self.OS.print("Second \n")
-        self.sleep(1,4)
+        self.sleep(0,{'nums':[1,4]})
 
     if self.getPlace():
         self.OS.print("third \n")
-        self.sleep(1,5)
+        self.sleep(0,{'nums':[1,5]})
 
     if self.getPlace():
         self.OS.print("fourth \n")
@@ -108,8 +110,8 @@ def sleepAndSuspendDemo( self):
     print('hello')
     if self.getPlace():
         self.OS.print("First Phrase","\n")
-        self.OS.fork(smallTask(8,send,1,parent=self))
-        self.sigSuspendV2()
+        self.OS.fork(SmallTask(8,send,1,parent=self))
+        self.sigSuspendV2(1)
 
     if self.getPlace():
         self.OS.print("Second \n")
@@ -133,16 +135,16 @@ def execDemo(self):
 
 if __name__ == '__main__':
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
-    #Make cleaner, better state saving with dict, add adjustable signal lengths, Make unittestes, Turn Shell into own process
-    #work through innerloops, make time in smallSignals replaceable with another timing mechanism from kernal.
+    #Make cleaner, add adjustable signal lengths, Make unittestes, Turn Shell into own process
+    #work through innerloops, make time in SmallSignals replaceable with another timing mechanism from kernal.
         update21= updater1()
         base = baseShell()
-        demo_1 = smallTask(1,forkDemo,1,name='Parent1', handlers=handler)
-        demo_2 = smallTask(1,pHDemo,1, name='Parent',handlers=handler)
-        demo_3 = smallTask(1,sleepDemo,1, name='Parent')
-        demo_4 = smallTask(1,sleepAndSuspendDemo,1, name='Parent')
-        demo_5 = smallTask(1,execDemo,1, name='Parent')
-        OS = smallOS(shells=base)
+        demo_1 = SmallTask(1,forkDemo,1,name='Parent1', handlers=handler)
+        demo_2 = SmallTask(1,pHDemo,1, name='Parent',handlers=handler)
+        demo_3 = SmallTask(1,sleepDemo,1, name='Parent')
+        demo_4 = SmallTask(1,sleepAndSuspendDemo,1, name='Parent')
+        demo_5 = SmallTask(1,execDemo,1, name='Parent')
+        OS = SmallOS(shells=base)
 
         tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
         fails = list()
