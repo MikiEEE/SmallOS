@@ -257,6 +257,7 @@ if __name__ == '__main__':
     OS.setKernel(Unix())
 
     tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+    # tasks = [demo_3]
     fails = list()
     #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])
     # self.OS.addTasks([demo_4])
