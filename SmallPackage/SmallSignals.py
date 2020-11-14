@@ -1,4 +1,4 @@
-import time
+
 
 
 
@@ -74,13 +74,17 @@ class SmallSignals(placeHolder):
         @param sig - int() - signal to be accepted.
         @return - int() - 0 upon suceess, -1 upon failure.
         '''
+
+        #Custom signal handlers would be very helpful. 
+        #Rather than a catch all function for handlers.
         if sig < len(self.signals) and sig > -1:
             self.signals[sig] = 1
             if self.handlers:
                 handlerTask = self.build(self.priority,
                                         self.signalHandler,
-                                        1, name='handler'
-                                        ,parent=self)
+                                        ready=1,
+                                        name='handler',
+                                        parent=self)
                 self.OS.fork(handlerTask)
             if sig in self.wakeSigs:
                 self.isWaiting = 0
@@ -111,7 +115,7 @@ class SmallSignals(placeHolder):
         if secs == -1:
             self.sleepTime = -1
         else:
-            self.timeOfSleep = time.time()
+            self.timeOfSleep = self.OS.kernel.time_epoch()
             self.sleepTime = secs
         return 0
 
@@ -143,7 +147,7 @@ class SmallSignals(placeHolder):
         if self.isSleep == 1:
             if self.sleepTime == -1: return -1
 
-            if time.time() - self.timeOfSleep >= self.sleepTime:
+            if self.OS.kernel.time_epoch() - self.timeOfSleep >= self.sleepTime:
                 self.isReady = 1
                 self.isSleep = 0
                 return self.priority
