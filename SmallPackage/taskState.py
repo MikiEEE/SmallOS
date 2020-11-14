@@ -73,12 +73,11 @@ class taskState():
             NOTE ***Returns a Deep Copy of the state so state must be updated. 
         '''
         if key == None:
-            return copy.deepcopy(self._state[namespace])
+            return copy.deepcopy(self._state[namespace]),0
         if key in self._state[namespace]:
-            return copy.deepcopy(self._state[namespace][key])
+            return copy.deepcopy(self._state[namespace][key]), 0
         else:
-            raise KeyError('The key:{} does not exist.\n'.format(key))
-            return -1
+            return None, -1
 
 
 

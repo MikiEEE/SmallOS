@@ -15,7 +15,7 @@ class SmallTask(SmallSignals, Node):
     '''
 
 
-    def __init__(self,priority,routine,isReady,**kwargs):
+    def __init__(self,priority,routine,**kwargs):
         '''
         @function __init__() - initializes variables to be used
             during normal functions.
@@ -40,7 +40,7 @@ class SmallTask(SmallSignals, Node):
         self.pid =  -1
         self.priority = priority
         self.routine = routine
-        self.isReady = isReady
+        self.isReady = 1
         self.isLocked = 0
         self.parent = None
         self.OS = None
@@ -61,6 +61,8 @@ class SmallTask(SmallSignals, Node):
                 self.updateFunc = kwargs['update']
             if kwargs.get('parent',False):
                 self.parent = kwargs['parent']
+            if 'isReady' in kwargs:
+                self.isReady = kwargs['isReady']
         return
 
 
@@ -93,7 +95,7 @@ class SmallTask(SmallSignals, Node):
         # if self.isSleep == 1 or self.isWaiting == 1:
         #     return 0
         if self.updateFunc:
-            if self.updateFunc.update() == 1:
+            if self.updateFunc(self) == 1:
                 self.isReady = 1
                 self.placeHolderReset()
             return 0
@@ -135,15 +137,24 @@ class SmallTask(SmallSignals, Node):
         self.OS = OS
 
 
-    def build(self,priority,task,ready,name='',parent=None):
+    def build(self,priority,task,ready=1,name='',parent=None):
             '''
             @function build - lets the smallsignal class create smallTasks. 
             @return - smallTask() 
             '''
-            task = SmallTask(priority,task,
-                            ready, name=name,
+            task = SmallTask(priority,
+                            task,
+                            isReady=ready,
+                            name=name,
                             parent=parent)
             return task
+
+
+    def fork(self,new_task):
+
+        new_task.parent = self
+        pid = self.OS.fork(new_task)
+        return pid
 
     def getExeStatus(self):
         '''

@@ -10,19 +10,18 @@ class test_taskState(unittest.TestCase):
 		state = taskState()
 		data = {'mice':10,'men':'blob','blob':{'10':20}}
 
-		blank_state = state.getState(None,'data')
+		blank_state, status = state.getState(None,'data')
 		self.assertEqual(blank_state,dict())
 
 		state.update(data,'data')
-		new_state = state.getState()
+		new_state, status = state.getState()
 		self.assertEqual(new_state, data)
 
-		one_var = state.getState('men','data')
+		one_var, status = state.getState('men','data')
 		self.assertEqual(data['men'],one_var)
 
-		with self.assertRaises(KeyError) as test:
-			one_var = state.getState('mmmmm')
-			print(one_var)
+		data, failed_status = state.getState('mmmmm')
+		self.assertEqual(failed_status, -1)
 
 
 	def test_Free(self):
