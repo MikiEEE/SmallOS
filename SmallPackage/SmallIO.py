@@ -1,6 +1,5 @@
 #Kernals will be swappable depending on what hardware you are running on.
 
-import sys
 
 class SmallIO():
     '''
@@ -14,13 +13,14 @@ class SmallIO():
     TODO: Turn appPrintQueue into a circular buffer.
     '''
 
-    def __init__(self):
+    def __init__(self, buffer_length):
         '''
         @fucntion __init__() - sets up the terminal toggle 
              and printqueuing veriables. 
         '''
         self.terminalToggle = False
         self.appPrintQueue = list()
+        self.buffer_length = buffer_length
         return 
 
 
@@ -33,7 +33,7 @@ class SmallIO():
         msg = ''.join([str(arg) for arg in args])
         if self.terminalToggle == False:
             self.kernel.write(msg)
-        elif len(self.appPrintQueue) < 1024:
+        elif len(self.appPrintQueue) < self.buffer_length:
             self.appPrintQueue.append(msg)
         else:
             self.appPrintQueue.pop(0)
@@ -61,8 +61,7 @@ class SmallIO():
         '''
         self.terminalToggle = not self.terminalToggle
         msg = ''.join('*' for x in range(16)) + '\n'
-        sys.stdout.write(msg) 
-        sys.stdout.flush()
+        self.kernel.write(msg)
         if self.terminalToggle == False:
             for num in range(len(self.appPrintQueue)):
                 msg = self.appPrintQueue.pop(0)

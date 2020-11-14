@@ -32,7 +32,7 @@ class SmallOS(SmallIO):
         self.tasks = OSList(10,size)
         self.kernel = None
 
-        SmallIO.__init__(self)
+        SmallIO.__init__(self, 1024)
         if kwargs:
             if kwargs.get('tasks',False):
                 tasks = kwargs['tasks']

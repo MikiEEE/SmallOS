@@ -2,168 +2,276 @@ from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
 from shells import baseShell
-import time, traceback 
 
 
-class updater1():
-    times = list()
-    timeout = 0
 
-    def __init__(self, timeout=1):
-        self.times = list()
-        self.timeout = timeout
+def update(self):
 
+    #Retrieve the system state from the datastore. 
+    data, status = self.state.getState('update','system')
 
-    def update(self):
-        self.times.append(time.time())
-        if len(self.times) < 2:
-            return 0
-        elif self.times[1] - self.times[0] > self.timeout:
-            self.times.pop(0)
-            return 1
-        else:
-            del self.times[1]
-            return 0
-        return
+    if status != 0:
 
-update21= updater1(1)
+        #if update dict is not in the system's data 
+        # add it along with the first data entry.
 
-def forkDemo(self):
+        time_start = self.OS.kernel.time_epoch()
+        data = {'update':time_start}
 
-    if self.pid == 0:
-        if self.getPlace():
-            vars = list()
-            vars.append(1)
-            pids = [self.OS.fork(SmallTask(x%7+ 1,forkDemo,1,parent=self,name=str(x))) for x in range(2**9)]
-            self.OS.print("Adding \n")
-            self.OS.fork(SmallTask(9,forkDemo,1,name='child',parent=self))
-            self.OS.print("PARENT SLEEPING\n")
-            self.sigSuspendV2(1)
-        elif self.getPlace():
-            self.OS.print("PARENT Done \n")
+        #Make sure the system namespace has been chosen 
+        #to avoid clashing.
+        self.state.update(data, 'system')
+        return 0
 
-    elif self.name == 'child':
-        self.sendSignal(0,1)
-         # pass
-    else:
-        self.sendSignal(0,2)
+    #Get the old and new values and subtract them to 
+    #see if one second has passed.
+    new_time = self.OS.kernel.time_epoch()
+    previous_time = data
+
+    #If one second has passed return one 
+    #signaling that the task will be reactivated.
+    if new_time - previous_time > 1:
+        data = {'update':new_time}
+        self.state.update(data)
+        return 1
+
     return 0
 
 
+
+
+
+
+
 def handler(self):
+    #Check to see if this signal has been triggered 
+    #If it has do something.
     if self.checkSignal(2):
         self.OS.print('from:',self.name,'ouch','\n')
     return 0 
 
 
+
+
+
+
+
 def send(self):
+    #Sends a signal back to the parent task.
     parent = self.parent
     parent = parent.pid
-    self.OS.print("Sending Signal \n")
+    self.OS.print('Sending Signal \n')
     self.sendSignal(parent,1)
     return 0
+
+
+
+
+
+
+
+def forkDemo(self):
+    '''
+    @func Fork Demo - demonstrates using small os to be able to 
+        switch between tasks and let routines be executed in the 
+        middle of the main task.
+
+        Allowing more concurrent code. 
+    '''
+
+
+    if self.pid == 0:
+        #This function is being used by both the parent and child processes.
+        #If this is the parent process enter this branch. 
+
+        if self.getPlace():
+            #Number of process to be added.
+            num_processes = 2**4
+            for num in range (num_processes):
+
+                #Establish process priority.
+                priority = num%6+ 2
+
+                #Establish routine to be run.
+                func = forkDemo
+
+                #Set Ready state(optional) assumed to be 1.
+                isReady = 1
+
+                #create the task. 
+                task = SmallTask(priority,func,isReady=isReady,name=str(num))
+
+                #Add the task to running process. 
+                #NOTE the task.fork will set task to be the parent process.
+                pid = self.fork(task)
+
+
+            #Initiate Child Process to wake the parent process up.
+            child = SmallTask(9,forkDemo,isReady=1,name='child')
+            self.fork(child)
+
+            #Suspend the parent task until the specified signal is recieved.
+            self.OS.print('Parent is going to sleep','\n')
+            self.sigSuspendV2(1)
+
+
+        elif self.getPlace():
+            #Upon waking up the parent task
+            self.OS.print('PARENT Done', '\n')
+
+
+    elif self.name == 'child':
+        #This loop is entered when the process 
+        #named child calls uses this function.
+
+        self.sendSignal(0,1)
+
+
+    else:
+        #All of the tasks created in the loop 
+        #that the parent task iterates through
+        #will go into this section of code since 
+        #their pids are not 0 and their name is 
+        #not child.
+
+        self.OS.print(self.parent,'\n')
+        self.sendSignal(0,2)
+
+
+    return 0
+
+
+
+
+
 
 
 def pHDemo(self):
 
     if self.getPlace():
-        self.OS.print("First Phrase","\n")
-        child = self.OS.fork(SmallTask(8,send,1,parent=self,update=update21, name='sender'))
+        self.OS.print('First Phrase','\n')
+        child = self.OS.fork(SmallTask(8,send,isReady=1,parent=self,update=update, name='sender'))
         self.sigSuspendV2(1,{'child':child})
 
     if self.getPlace():
-        self.OS.print("Second \n")
+        self.OS.print('Second \n')
         self.sigSuspendV2(1) 
 
     if self.getPlace():
-        self.OS.print("third \n")
+        self.OS.print('third \n')
         self.sigSuspendV2(1) 
 
     if self.getPlace():
-        self.OS.print("fourth \n")
-        pid = self.state.getState('child')
+        self.OS.print('fourth \n')
+        pid, status = self.state.getState('child')
         self.OS.tasks.delete(pid)
     return 0
 
 
+
+
+
+
+
 def sleepDemo( self):
     if self.getPlace():
-        self.OS.print("First Phrase","\n")
+        self.OS.print('First Phrase','\n')
         # self.OS.fork(SmallTask(8,send,1,parent=self,update=update21), self)
         nums = [1,3,[5,7,9]]
         self.sleep(0,{'nums':nums})
 
     if self.getPlace():
-        self.OS.print("Second \n")
+        self.OS.print('Second \n')
         self.sleep(0,{'nums':[1,4]})
 
     if self.getPlace():
-        self.OS.print("third \n")
+        self.OS.print('third \n')
         self.sleep(0,{'nums':[1,5]})
 
     if self.getPlace():
-        self.OS.print("fourth \n")
+        self.OS.print('fourth \n')
     return 0
+
+
+
+
+
 
 
 def sleepAndSuspendDemo( self):
     print('hello')
     if self.getPlace():
-        self.OS.print("First Phrase","\n")
-        self.OS.fork(SmallTask(8,send,1,parent=self))
+        self.OS.print('First Phrase','\n')
+        self.fork(SmallTask(8,send))
         self.sigSuspendV2(1)
 
     if self.getPlace():
-        self.OS.print("Second \n")
+        self.OS.print('Second \n')
         self.sleep(1)
 
     if self.getPlace():
-        self.OS.print("third \n")
+        self.OS.print('third \n')
         # self.sigSuspendV2( 0,1) 
 
     # if self.getPlace():
-    #     self.OS.print("fourth \n")
+    #     self.OS.print('fourth \n')
     return 0
+
+
+
+
+
+
 
 #@task
 def execDemo(self):
     cmd = '''self.OS.print('HELLO','\\n',self,'\\n')'''
-    cmd = compile(cmd,"demo.py","exec")
+    cmd = compile(cmd,'demo.py','exec')
     exec(cmd)
     return 0
 
 
 if __name__ == '__main__':
+    import traceback
+
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
     #Make cleaner, add adjustable signal lengths, Turn Shell into own process
+    #Turn OSlist into Balanced Bin Tree?
     #work through innerloops.
-        update21= updater1()
-        base = baseShell()
-        demo_1 = SmallTask(1,forkDemo,1,name='Parent1', handlers=handler)
-        demo_2 = SmallTask(1,pHDemo,1, name='Parent',handlers=handler)
-        demo_3 = SmallTask(1,sleepDemo,1, name='Parent')
-        demo_4 = SmallTask(1,sleepAndSuspendDemo,1, name='Parent')
-        demo_5 = SmallTask(1,execDemo,1, name='Parent')
-        OS = SmallOS(shells=base)
+    #Create config file.
 
-        OS.setKernel(Unix())
 
-        tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
-        fails = list()
-        #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])
-        # self.OS.addTasks([demo_4])
-        # self.OS.start()
-        for num, demo in enumerate(tasks):
-            try:
-                OS.fork(demo)
-                OS.start()
-            except: 
-                print(traceback.format_exc())
-                fails.append(num + 1)
+    #Priority is set to 2 to give higher priority (quick) system tasks
+    #such as a2d reading input checking a chance to run quickly.  
+    priority = 2 
 
-        if len(fails) == 0:
-            print('ALL DEMOS COMPLETED SUCCESSFULLY')
-        else:
-            print(fails)
-        # self.OS.print('\n')
+    base = baseShell()
+    demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
+    demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
+    demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
+    demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
+    demo_5 = SmallTask(priority,execDemo,name='Parent5')
+    
+    #Instantiate and configure the OS.
+    OS = SmallOS(shells=base)
+    OS.setKernel(Unix())
+
+    tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+    fails = list()
+    #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])
+    # self.OS.addTasks([demo_4])
+    # self.OS.start()
+    for num, demo in enumerate(tasks):
+        try:
+            OS.fork(demo)
+            OS.start()
+        except: 
+            print(traceback.format_exc())
+            fails.append(num + 1)
+
+    if len(fails) == 0:
+        print('ALL DEMOS COMPLETED SUCCESSFULLY')
+    else:
+        print(fails)
+    # self.OS.print('\n')
 
