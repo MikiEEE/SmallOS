@@ -10,7 +10,7 @@ from .taskState import taskState
 def is_iterator(obj):
     if (
             hasattr(obj, '__iter__') and
-            hasattr(obj, '__next__') and      # or __next__ in Python 3
+            hasattr(obj, '__next__') and 
             callable(obj.__iter__) and
             obj.__iter__() is obj
         ):
