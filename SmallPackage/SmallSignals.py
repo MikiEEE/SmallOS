@@ -114,7 +114,8 @@ class SmallSignals(placeHolder):
 
         if state_blob != None:
             self.state.update(state_blob)
-
+        return_val = {'return_status':1}
+        self.state.update(return_val,'system')
         self.setPlaceholder()
         self.isSleep = 1
         self.OS.tasks.moveToSleepList(self)
@@ -184,6 +185,8 @@ class SmallSignals(placeHolder):
         self.isWaiting = 1
         self.isReady = 0
         self.setPlaceholder()
+        return_val = {'return_status':0}
+        self.state.update(return_val,'system')
         return 
 
 
