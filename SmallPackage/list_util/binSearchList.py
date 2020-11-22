@@ -1,6 +1,6 @@
-from numpy import log as ln
-import math 
-import random
+# from numpy import log as ln
+# import math 
+# import random
 
 
 
@@ -81,66 +81,66 @@ def insert(data,target,l,r,func=None):
 
 
 
-def round_up(n, decimals=0): 
-	'''
-	Rounds the value up
-	Used For testing will be put in another file 
-	'''
-	multiplier = 10 ** decimals
-	return math.ceil(n * multiplier) / multiplier
+# def round_up(n, decimals=0): 
+# 	'''
+# 	Rounds the value up
+# 	Used For testing will be put in another file 
+# 	'''
+# 	multiplier = 10 ** decimals
+# 	return math.ceil(n * multiplier) / multiplier
 
 
-def test_search():
-	'''
-	Used For testing will be put in another file 
-	'''
-	global count 
-	flaws = list()
-	for x in range(LENGTH):
-		count = 0
-		target = random.randint(0,LENGTH)
-		print(search(data,target,0,len(data)))
-		if count > MAXTIME: 
-			flaws.append("Error with %s, count %s , max: %s " % (x, count, MAXTIME))
-	print(search(data,-1,-1,len(data)))
-	print(search(data,LENGTH,-1,len(data)))
-	[print(x) for x in flaws]
+# def test_search():
+# 	'''
+# 	Used For testing will be put in another file 
+# 	'''
+# 	global count 
+# 	flaws = list()
+# 	for x in range(LENGTH):
+# 		count = 0
+# 		target = random.randint(0,LENGTH)
+# 		print(search(data,target,0,len(data)))
+# 		if count > MAXTIME: 
+# 			flaws.append("Error with %s, count %s , max: %s " % (x, count, MAXTIME))
+# 	print(search(data,-1,-1,len(data)))
+# 	print(search(data,LENGTH,-1,len(data)))
+# 	[print(x) for x in flaws]
 
 
-def insertNode(test_Insert,x):
-	'''
-	Used For testing will be put in another file 
-	'''
-	result = insert(test_Insert,x,0,len(test_Insert))
-	test_Insert.insert(result,x)
-	return  test_Insert
+# def insertNode(test_Insert,x):
+# 	'''
+# 	Used For testing will be put in another file 
+# 	'''
+# 	result = insert(test_Insert,x,0,len(test_Insert))
+# 	test_Insert.insert(result,x)
+# 	return  test_Insert
 
 
-def test_insert():
-	'''
-	Used For testing will be put in another file 
-	'''
-	toSort = [random.randint(-LENGTH,LENGTH) for x in range(LENGTH)]
-	test_Insert = []
-	print(toSort[1:10])
-	for x in toSort:
-		test_insert = insertNode(test_Insert,x)
-	if test_Insert == sorted(toSort):
-		print(test_insert[1:10])
-		print('True')
+# def test_insert():
+# 	'''
+# 	Used For testing will be put in another file 
+# 	'''
+# 	toSort = [random.randint(-LENGTH,LENGTH) for x in range(LENGTH)]
+# 	test_Insert = []
+# 	print(toSort[1:10])
+# 	for x in toSort:
+# 		test_insert = insertNode(test_Insert,x)
+# 	if test_Insert == sorted(toSort):
+# 		print(test_insert[1:10])
+# 		print('True')
 
 
-if __name__=='__main__':
+# if __name__=='__main__':
 
-	LENGTH = 2**12
+# 	LENGTH = 2**12
 
-	MAXTIME = ln(LENGTH)/ln(2)
-	MAXTIME = round_up(MAXTIME) + 1
+# 	MAXTIME = ln(LENGTH)/ln(2)
+# 	MAXTIME = round_up(MAXTIME) + 1
 
-	print("Length %s Maxtime %s" % (LENGTH, MAXTIME))
-	data = list(range(LENGTH))
+# 	print("Length %s Maxtime %s" % (LENGTH, MAXTIME))
+# 	data = list(range(LENGTH))
 
-	count = 0
+# 	count = 0
 
-	test_search()
-	test_insert()
+# 	test_search()
+# 	test_insert()

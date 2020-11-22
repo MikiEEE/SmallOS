@@ -156,6 +156,7 @@ class SmallTask(SmallSignals, Node):
         pid = self.OS.fork(new_task)
         return pid
 
+
     def getExeStatus(self):
         '''
         @function getExeStatus() - Checks all of the process's statuses to see
