@@ -7,6 +7,19 @@ from .list_util.linkedList import Node
 from .taskState import taskState
 
 
+def is_iterator(obj):
+    if (
+            hasattr(obj, '__iter__') and
+            hasattr(obj, '__next__') and      # or __next__ in Python 3
+            callable(obj.__iter__) and
+            obj.__iter__() is obj
+        ):
+        return True
+    else:
+        return False
+
+
+
 class SmallTask(SmallSignals, Node):
     '''
     @Class smallTask() - Object that contains Tasks contents: The routine,
@@ -68,9 +81,27 @@ class SmallTask(SmallSignals, Node):
 
     def wrap(self, func):
         def wrapper(self):
+            #Set the return value to the OS.
             return_val = {'return_status':0}
             self.state.update(return_val,'system')
-            func(self)
+
+            data = self.state.getState('has_run','system')
+
+            if is_iterator(func(self)):
+                try:
+                    if data[1] == -1:
+                        blob = {'has_run':1}
+                        self.state.update(blob,'system')
+                        self.f = func(self)
+                        next(self.f)
+
+                    else:
+                        self.f.send(None)
+
+                except StopIteration as e:
+                    self.f.close()
+            else: 
+                func(self)
             return self.state.getState('return_status','system')[0]
         return wrapper
             

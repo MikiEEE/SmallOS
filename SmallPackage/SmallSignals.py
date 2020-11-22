@@ -185,9 +185,9 @@ class SmallSignals(placeHolder):
         self.isWaiting = 1
         self.isReady = 0
         self.setPlaceholder()
-        return_val = {'return_status':0}
+        return_val = {'return_status':1}
         self.state.update(return_val,'system')
-        return 
+        return
 
 
     def signalHandler(self,task):
