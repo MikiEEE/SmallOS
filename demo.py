@@ -3,7 +3,7 @@ from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
 from shells import baseShell
 
-import pdb
+import pdb, select,sys
 
 def update(self):
 
@@ -114,7 +114,6 @@ def forkDemo(self):
         yield self.sigSuspendV2(1)
 
 
-        # elif self.getPlace():
         #Upon waking up the parent task
         self.OS.print('PARENT Done', '\n')
 
@@ -145,23 +144,19 @@ def forkDemo(self):
 
 def pHDemo(self):
 
-    # if self.getPlace():
     self.OS.print('First Phrase','\n')
     child = self.OS.fork(SmallTask(8,send,isReady=1,parent=self,update=update, name='sender'))
     yield self.sigSuspendV2(1,{'child':child})
 
-    # if self.getPlace():
     self.OS.print('Second \n')
     yield self.sigSuspendV2(1) 
 
-    # if self.getPlace():
     self.OS.print('third \n')
     yield self.sigSuspendV2(1) 
 
-    # if self.getPlace():
     self.OS.print('fourth \n')
     pid, status = self.state.getState('child')
-    self.OS.tasks.delete(pid)
+    self.OS.tasks.delete(child)
     return 
 
 
@@ -171,21 +166,18 @@ def pHDemo(self):
 
 
 def sleepDemo( self):
-    # if self.getPlace():
+
     self.OS.print('First Phrase','\n')
     # self.OS.fork(SmallTask(8,send,1,parent=self,update=update21), self)
     nums = [1,3,[5,7,9]]
     yield self.sleep(0,{'nums':nums})
 
-    # if self.getPlace():
     self.OS.print('Second \n')
     yield self.sleep(0,{'nums':[1,4]})
 
-    # if self.getPlace():
     self.OS.print('third \n')
     yield self.sleep(0,{'nums':[1,5]})
 
-    # if self.getPlace():
     self.OS.print('fourth \n')
     return 
 
@@ -197,21 +189,14 @@ def sleepDemo( self):
 
 def sleepAndSuspendDemo( self):
     print('hello')
-    if self.getPlace():
-        self.OS.print('First Phrase','\n')
-        self.fork(SmallTask(8,send))
-        yield self.sigSuspendV2(1)
+    self.OS.print('First Phrase','\n')
+    self.fork(SmallTask(8,send))
+    yield self.sigSuspendV2(1)
 
-    if self.getPlace():
-        self.OS.print('Second \n')
-        yield self.sleep(1)
+    self.OS.print('Second \n')
+    yield self.sleep(1)
 
-    if self.getPlace():
-        self.OS.print('third \n')
-        # self.sigSuspendV2( 0,1) 
-
-    # if self.getPlace():
-    #     self.OS.print('fourth \n')
+    self.OS.print('third \n')
     return 
 
 
@@ -238,8 +223,34 @@ def loop_demo(self):
         if i == 50:
             self.OS.print('Sleeeping...','\n')
             yield self.sleep(.0001)
+    # self.OS.tasks.delete(6)
+    return
 
 
+
+
+
+
+def watcher_IO(self):
+    #This is a high priority watcher function
+    #Its purpose is to poll for IO interactions
+    #and pipe data to the respective running process
+    #
+    #At this stage in project I recommend you  would 
+    #have multiple of these polling for different things.
+    #
+    #In an Ideal setting, using interrupts to wake up tasks
+    #like these would be good.
+    base = baseShell()
+    shells = list()
+    shells.append(base)
+    while 1:
+        if select.select([sys.stdin,],[],[],0.0)[0]:
+            inpt = sys.stdin.readline()
+            for shell in shells:
+                shell.run(self.OS,inpt)
+        yield self.sleep(.0001)
+    return 
 
 
 if __name__ == '__main__':
@@ -255,9 +266,10 @@ if __name__ == '__main__':
 
     #Priority is set to 2 to give higher priority (quick) system tasks
     #such as a2d reading input checking a chance to run quickly.  
-    priority = 1
+    priority = 2
 
     base = baseShell()
+    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO')
     demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
@@ -269,8 +281,8 @@ if __name__ == '__main__':
     OS = SmallOS(shells=base)
     OS.setKernel(Unix())
     # pdb.set_trace()
-    tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
-    tasks = [demo_1,demo_6]
+    tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
+    # tasks = [demo_1,watcher_IO]#,demo_6]
     # tasks = [demo_3]
     fails = list()
     OS.fork(tasks)

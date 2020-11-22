@@ -259,6 +259,8 @@ class OSList(smallPID):
         removeNode(sleep_task)
         priority = sleep_task.priority
 
+
+        if not (sleep_task and self.cats[priority]): return
         if self.cats[priority].getID() == sleep_task.getID():
             self.cats[priority] = self.cats[priority].next
 
