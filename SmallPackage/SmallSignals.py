@@ -87,6 +87,8 @@ class SmallSignals(placeHolder):
                                         parent=self)
                 self.OS.fork(handlerTask)
             if sig in self.wakeSigs:
+                #It may be helpful to move this to a suspended list 
+                # in the OS.
                 self.isWaiting = 0
                 self.isReady = 1
                 self.wakeSigs.remove(sig)
@@ -108,10 +110,15 @@ class SmallSignals(placeHolder):
                     Insert  0 to just interrupt the process for this instant.
         @return 0 upon success, -1 upon an error.
         '''
+
+
         if state_blob != None:
             self.state.update(state_blob)
+
         self.setPlaceholder()
         self.isSleep = 1
+        self.OS.tasks.moveToSleepList(self)
+
         if secs == -1:
             self.sleepTime = -1
         else:
@@ -127,6 +134,8 @@ class SmallSignals(placeHolder):
         @return void
         '''
         self.isSleep = 0
+        #Added, woken tasks will be exceuted first if their priority is greater.
+        self.OS.tasks.notifyWake(self)
         return
 
 
