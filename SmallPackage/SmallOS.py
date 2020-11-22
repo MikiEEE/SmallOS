@@ -63,7 +63,6 @@ class SmallOS(SmallIO):
             sleep_cursor = self.tasks.sleepList
             while sleep_cursor != None:
                 if sleep_cursor.checkSleep() > 0:
-                    print(sleep_cursor)
                     sleep_cursor.wake()
                 sleep_cursor = sleep_cursor.next
 

@@ -3,8 +3,7 @@ from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
 from shells import baseShell
 
-import types
-
+import pdb
 
 def update(self):
 
@@ -229,6 +228,20 @@ def execDemo(self):
     return 
 
 
+
+
+
+def loop_demo(self):
+    for i in range(100):
+        print(i)
+        # yield self.sleep(3)
+        if i == 50:
+            self.OS.print('Sleeeping...','\n')
+            yield self.sleep(.0001)
+
+
+
+
 if __name__ == '__main__':
     import traceback
 
@@ -237,6 +250,7 @@ if __name__ == '__main__':
     #Turn OSlist into Balanced Bin Tree?
     #work through innerloops.
     #Create config file.
+    #remove placeholder class
 
 
     #Priority is set to 2 to give higher priority (quick) system tasks
@@ -249,15 +263,17 @@ if __name__ == '__main__':
     demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
     demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
     demo_5 = SmallTask(priority,execDemo,name='Parent5')
+    demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
     
     #Instantiate and configure the OS.
     OS = SmallOS(shells=base)
     OS.setKernel(Unix())
-
+    # pdb.set_trace()
     tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+    tasks = [demo_1,demo_6]
     # tasks = [demo_3]
     fails = list()
-    OS.fork([demo_1,demo_2,demo_3,demo_4])
+    OS.fork(tasks)
     # OS.addTasks([demo_4])
     OS.start()
     # for num, demo in enumerate(tasks):
