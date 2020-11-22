@@ -93,7 +93,7 @@ class SmallOS(SmallIO):
         '''
         if isinstance(children,list):
             ids = list()
-            for item in childern:
+            for item in children:
                 pid = self.tasks.insert(item)
                 if pid != - 1: 
                     item.setOS(self)
