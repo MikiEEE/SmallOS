@@ -243,7 +243,7 @@ if __name__ == '__main__':
 
     #Priority is set to 2 to give higher priority (quick) system tasks
     #such as a2d reading input checking a chance to run quickly.  
-    priority = 2 
+    priority = 1
 
     base = baseShell()
     demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
@@ -257,6 +257,7 @@ if __name__ == '__main__':
     OS.setKernel(Unix())
 
     tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+    # tasks = [demo_3]
     fails = list()
     #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])
     # self.OS.addTasks([demo_4])

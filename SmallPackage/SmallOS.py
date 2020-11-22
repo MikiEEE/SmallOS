@@ -1,4 +1,3 @@
-import time
 import sys
 import traceback
 import select
@@ -60,18 +59,25 @@ class SmallOS(SmallIO):
                 for shell in self.shells:
                     shell.run(self,inpt)
 
-            update = cursor.update()
-            result = -1   
             
-            if cursor.getExeStatus():
-                result = cursor.excecute()
-            else:
-                self.tasks.setCatSel(cursor.checkSleep())
-            
-            if update == -1 and result == 0 and cursor.getDelStatus():
-                self.tasks.delete(cursor.pid)
+            sleep_cursor = self.tasks.sleepList
+            while sleep_cursor != None:
+                if sleep_cursor.checkSleep() > 0:
+                    print(sleep_cursor)
+                    sleep_cursor.wake()
+                sleep_cursor = sleep_cursor.next
 
-            cursor = self.tasks.pop()
+            if cursor != None:
+                update = cursor.update() 
+
+                result = -1  
+                if cursor.getExeStatus():
+                    result = cursor.excecute()
+                
+                if update == -1 and result == 0 and cursor.getDelStatus():
+                    self.tasks.delete(cursor.pid)
+
+                cursor = self.tasks.pop()
 
             if cursor == None: 
                 self.tasks.resetCatSel()

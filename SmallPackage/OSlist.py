@@ -1,11 +1,10 @@
 
 
-from .SmallTask import SmallTask
 from .list_util.linkedList import insertNext, removeNode
 from .list_util.binSearchList import insert, search
 
 
-import time
+# import time
 
 
 
@@ -88,6 +87,7 @@ class OSList(smallPID):
         self.catSelect = 0
         self.tasks = list()
         self.current = None
+        self.sleepList = None
         self.func = lambda data, index: data[index].getID()
         return 
 
@@ -115,7 +115,7 @@ class OSList(smallPID):
         @param newSel - the priority of the new task. 
         @return - int - 0 on a valid priority and -1 on an invalid priority. 
         '''
-        if 0 < newSel < len(self.cats):
+        if 0 <= newSel < len(self.cats):
             if self.catSelect > newSel:
                 self.catSelect = newSel
                 self.current = None
@@ -167,6 +167,9 @@ class OSList(smallPID):
         else: 
             self.incrementCat()
             self.current = self.availCat(self.catSelect)
+
+        if self.current != None and self.current.priority >  self.catSelect:
+            self.catSelect = self.current.priority
         return self.current
 
 
@@ -179,7 +182,7 @@ class OSList(smallPID):
         @return - int - positive integer on success, -1 on failure. 
         '''
         priority = task.priority
-        if priority < len(self.cats):
+        if 0 < priority < len(self.cats):
 
             pid = self.newPID()
             if pid == -1: return -1
@@ -249,6 +252,52 @@ class OSList(smallPID):
         return [task for task in self.tasks]
 
 
+    def moveToSleepList(self,sleep_task):
+        
+        #Remove From the priority category list 
+        #but keep in the pid list  for searching
+        removeNode(sleep_task)
+        priority = sleep_task.priority
+
+        if self.cats[priority].getID() == sleep_task.getID():
+            self.cats[priority] = self.cats[priority].next
+
+        #Clear the active tasks from the memory
+        sleep_task.next = None
+        sleep_task.prev = None
+
+        #Add to sleep list
+        if self.sleepList == None:
+            self.sleepList = sleep_task
+        else:
+            insertNext(self.sleepList, sleep_task)
+        return
+
+
+    def notifyWake(self,woken_task):
+
+        priority = woken_task.priority
+
+        #Determine if it is the head of Sleep list
+        if self.sleepList.getID() == woken_task.getID():
+
+            if woken_task.next != None:
+                self.sleepList = self.sleepList.next 
+            else:
+                self.sleepList = None
+        
+        removeNode(woken_task)
+        woken_task.prev = None
+        woken_task.next = None
+
+        if self.cats[priority] == None:
+            self.cats[priority] = woken_task
+        else:
+            insertNext(self.cats[priority],woken_task)
+
+        return self.setCatSel(priority)
+
+
     def __len__(self):
         '''
         @function __len__() - returns the number of tasks 
@@ -268,35 +317,28 @@ class OSList(smallPID):
 
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
+
+#     tasks = OSList(10)
+
+#     secs = time.time()
+#     # for x in range(2**6):
+#     #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
+#     pid1 = tasks.insert(smallTask(1,None, name=str(1)))
+#     pid2 = tasks.insert(smallTask(2,None, name=str(2)))
+#     pid3 = tasks.insert(smallTask(3,None, name=str(3)))
+#     pid4 = tasks.insert(smallTask(4,None, name=str(4)))
+#     pid5 = tasks.insert(smallTask(5,None, name=str(5)))
+
+   
+#     print([x.priority for x in tasks.cats[0:4]])
+#     cursor = tasks.pop()
+#     while cursor != None:
+#         cursor.isReady = 0
+#         print(cursor.name, cursor.getID(), cursor.priority)
+#         cursor = tasks.pop()
+
+#     print(len(tasks))
 
 
-    tasks = OSList(10)
 
-    secs = time.time()
-    # for x in range(2**6):
-    #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
-    pid1 = tasks.insert(smallTask(1,None,1, name=str(1)))
-    pid2 = tasks.insert(smallTask(1,None,1, name=str(2)))
-    pid3 = tasks.insert(smallTask(1,None,1, name=str(3)))
-
-    print(tasks.cats[1],'\n#')
-
-    tasks.delete(0)
-
-    print(tasks.cats[1].next,'\n#')
-
-    tasks.delete(2)
-
-    pid2 = tasks.insert(smallTask(1,None,1, name=str(2)))
-    pid3 = tasks.insert(smallTask(1,None,1, name=str(3)))
-
-    print(tasks.cats[1])
-    # print([x.priority for x in tasks.cats[0:4]])
-    # cursor = tasks.pop()
-    # while cursor != None:
-    #     cursor.isReady = 0
-    #     print(cursor.name, cursor.getID(), cursor.priority)
-    #     cursor = tasks.pop()
-
-    # print(len(tasks))

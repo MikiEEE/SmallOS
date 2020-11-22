@@ -32,6 +32,11 @@ class baseShell():
 		if 'kill' in inpt_set:
 			OS.tasks.delete(int(inpt.split()[-1]))
 		# if ''.join(inpt) != '':
+
+		if 'exec' in inpt_set:
+			i = list(inpt.split())
+			i = ' '.join(i[1:])
+			exec(i)
 		OS.sPrint('CMD: ')
 		# print('',end='')
 		return
