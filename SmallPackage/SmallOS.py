@@ -30,6 +30,7 @@ class SmallOS(SmallIO):
         self.shells = list()
         self.tasks = OSList(10,size)
         self.kernel = None
+        self.eternal_watchers = 0
 
         SmallIO.__init__(self, 1024)
         if kwargs:
@@ -50,15 +51,9 @@ class SmallOS(SmallIO):
         @return void
         '''
         self.tasks.resetCatSel()
-        cursor = self.tasks.pop()
+        self.cursor = self.tasks.pop()
 
         while len(self.tasks) != 0:
-
-            if select.select([sys.stdin,],[],[],0.0)[0]:
-                inpt = sys.stdin.readline()
-                for shell in self.shells:
-                    shell.run(self,inpt)
-
             
             sleep_cursor = self.tasks.sleepList
             while sleep_cursor != None:
@@ -66,23 +61,27 @@ class SmallOS(SmallIO):
                     sleep_cursor.wake()
                 sleep_cursor = sleep_cursor.next
 
-            if cursor != None:
-                update = cursor.update() 
+            if self.cursor != None:
+                update = self.cursor.update() 
 
                 result = -1  
-                if cursor.getExeStatus():
-                    result = cursor.excecute()
+                if self.cursor.getExeStatus():
+                    result = self.cursor.excecute()
                 
-                if update == -1 and result == 0 and cursor.getDelStatus():
-                    self.tasks.delete(cursor.pid)
+                if update == -1 and result == 0 and self.cursor.getDelStatus():
+                    self.tasks.delete(self.cursor.getID())
 
-                cursor = self.tasks.pop()
+                self.cursor = self.tasks.pop()
 
-            if cursor == None: 
+            if self.cursor == None: 
                 self.tasks.resetCatSel()
-                cursor = self.tasks.pop()
+                self.cursor = self.tasks.pop()
         return
 
+
+    def next(self):
+        self.cursor = self.tasks.pop()
+        return
 
     def fork(self,children):
         '''
@@ -111,6 +110,28 @@ class SmallOS(SmallIO):
         '''
         self.kernel = kernel
         return 
+
+
+    def setEternalWatchers(self,num_watchers):
+        '''
+        @param num_watchers - int - the number of watchers that never die
+            in the OS. 
+        '''
+        self.eternal_watchers = num_watchers
+        return 
+
+
+    def killWhenOnlyWatchers(self):
+        '''
+        @function killWhenOnlyWatchers() - ends runtime when only the
+            watcher tasks are alive. 
+        
+        '''
+        # if len(self.OS.tasks) > 0 and len(self.OS.tasks) == self.num_watchers:
+        #     cursor = tasks
+        #     while len(self.tasks) != 0:
+        pass
+
 
 
     def __str__(self):

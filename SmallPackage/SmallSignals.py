@@ -107,7 +107,8 @@ class SmallSignals(placeHolder):
             sleep.
             **NOTE** Insert Negative one (-1) for secs to wake up task in signal Handler with custom
                         Signal handler. 
-                    Insert  0 to just interrupt the process for this instant.
+                    Insert  a really small number for sec
+                    to just interrupt the process for this instant.
         @return 0 upon success, -1 upon an error.
         '''
 
@@ -185,7 +186,7 @@ class SmallSignals(placeHolder):
         self.isWaiting = 1
         self.isReady = 0
         self.setPlaceholder()
-        return_val = {'return_status':1}
+        return_val = {'return_status':2}
         self.state.update(return_val,'system')
         return
 
