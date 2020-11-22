@@ -243,7 +243,7 @@ if __name__ == '__main__':
 
     #Priority is set to 2 to give higher priority (quick) system tasks
     #such as a2d reading input checking a chance to run quickly.  
-    priority = 2 
+    priority = 1
 
     base = baseShell()
     demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)

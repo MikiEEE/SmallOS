@@ -4,7 +4,7 @@ from .list_util.linkedList import insertNext, removeNode
 from .list_util.binSearchList import insert, search
 
 
-import time
+# import time
 
 
 
@@ -115,7 +115,7 @@ class OSList(smallPID):
         @param newSel - the priority of the new task. 
         @return - int - 0 on a valid priority and -1 on an invalid priority. 
         '''
-        if 0 < newSel < len(self.cats):
+        if 0 <= newSel < len(self.cats):
             if self.catSelect > newSel:
                 self.catSelect = newSel
                 self.current = None
@@ -182,7 +182,7 @@ class OSList(smallPID):
         @return - int - positive integer on success, -1 on failure. 
         '''
         priority = task.priority
-        if priority < len(self.cats):
+        if 0 < priority < len(self.cats):
 
             pid = self.newPID()
             if pid == -1: return -1
@@ -317,28 +317,28 @@ class OSList(smallPID):
 
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
 
-    tasks = OSList(10)
+#     tasks = OSList(10)
 
-    secs = time.time()
-    # for x in range(2**6):
-    #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
-    pid1 = tasks.insert(smallTask(1,None, name=str(1)))
-    pid2 = tasks.insert(smallTask(2,None, name=str(2)))
-    pid3 = tasks.insert(smallTask(3,None, name=str(3)))
-    pid4 = tasks.insert(smallTask(4,None, name=str(4)))
-    pid5 = tasks.insert(smallTask(5,None, name=str(5)))
+#     secs = time.time()
+#     # for x in range(2**6):
+#     #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
+#     pid1 = tasks.insert(smallTask(1,None, name=str(1)))
+#     pid2 = tasks.insert(smallTask(2,None, name=str(2)))
+#     pid3 = tasks.insert(smallTask(3,None, name=str(3)))
+#     pid4 = tasks.insert(smallTask(4,None, name=str(4)))
+#     pid5 = tasks.insert(smallTask(5,None, name=str(5)))
 
    
-    print([x.priority for x in tasks.cats[0:4]])
-    cursor = tasks.pop()
-    while cursor != None:
-        cursor.isReady = 0
-        print(cursor.name, cursor.getID(), cursor.priority)
-        cursor = tasks.pop()
+#     print([x.priority for x in tasks.cats[0:4]])
+#     cursor = tasks.pop()
+#     while cursor != None:
+#         cursor.isReady = 0
+#         print(cursor.name, cursor.getID(), cursor.priority)
+#         cursor = tasks.pop()
 
-    print(len(tasks))
+#     print(len(tasks))
 
 
 
