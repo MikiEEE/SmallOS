@@ -48,7 +48,7 @@ def handler(self):
     #If it has do something.
     if self.checkSignal(2):
         self.OS.print('from:',self.name,'ouch','\n')
-    return 0 
+    return  
 
 
 
@@ -62,7 +62,7 @@ def send(self):
     parent = parent.pid
     self.OS.print('Sending Signal \n')
     self.sendSignal(parent,1)
-    return 0
+    return 
 
 
 
@@ -112,7 +112,7 @@ def forkDemo(self):
 
             #Suspend the parent task until the specified signal is recieved.
             self.OS.print('Parent is going to sleep','\n')
-            self.sigSuspendV2(1)
+            return self.sigSuspendV2(1)
 
 
         elif self.getPlace():
@@ -138,7 +138,7 @@ def forkDemo(self):
         self.sendSignal(0,2)
 
 
-    return 0
+    return 
 
 
 
@@ -151,21 +151,21 @@ def pHDemo(self):
     if self.getPlace():
         self.OS.print('First Phrase','\n')
         child = self.OS.fork(SmallTask(8,send,isReady=1,parent=self,update=update, name='sender'))
-        self.sigSuspendV2(1,{'child':child})
+        return self.sigSuspendV2(1,{'child':child})
 
     if self.getPlace():
         self.OS.print('Second \n')
-        self.sigSuspendV2(1) 
+        return self.sigSuspendV2(1) 
 
     if self.getPlace():
         self.OS.print('third \n')
-        self.sigSuspendV2(1) 
+        return self.sigSuspendV2(1) 
 
     if self.getPlace():
         self.OS.print('fourth \n')
         pid, status = self.state.getState('child')
         self.OS.tasks.delete(pid)
-    return 0
+    return 
 
 
 
@@ -178,19 +178,19 @@ def sleepDemo( self):
         self.OS.print('First Phrase','\n')
         # self.OS.fork(SmallTask(8,send,1,parent=self,update=update21), self)
         nums = [1,3,[5,7,9]]
-        self.sleep(0,{'nums':nums})
+        return self.sleep(0,{'nums':nums})
 
     if self.getPlace():
         self.OS.print('Second \n')
-        self.sleep(0,{'nums':[1,4]})
+        return self.sleep(0,{'nums':[1,4]})
 
     if self.getPlace():
         self.OS.print('third \n')
-        self.sleep(0,{'nums':[1,5]})
+        return self.sleep(0,{'nums':[1,5]})
 
     if self.getPlace():
         self.OS.print('fourth \n')
-    return 0
+    return 
 
 
 
@@ -203,11 +203,11 @@ def sleepAndSuspendDemo( self):
     if self.getPlace():
         self.OS.print('First Phrase','\n')
         self.fork(SmallTask(8,send))
-        self.sigSuspendV2(1)
+        return self.sigSuspendV2(1)
 
     if self.getPlace():
         self.OS.print('Second \n')
-        self.sleep(1)
+        return self.sleep(1)
 
     if self.getPlace():
         self.OS.print('third \n')
@@ -215,7 +215,7 @@ def sleepAndSuspendDemo( self):
 
     # if self.getPlace():
     #     self.OS.print('fourth \n')
-    return 0
+    return 
 
 
 
@@ -228,7 +228,7 @@ def execDemo(self):
     cmd = '''self.OS.print('HELLO','\\n',self,'\\n')'''
     cmd = compile(cmd,'demo.py','exec')
     exec(cmd)
-    return 0
+    return 
 
 
 if __name__ == '__main__':
@@ -256,7 +256,7 @@ if __name__ == '__main__':
     OS = SmallOS(shells=base)
     OS.setKernel(Unix())
 
-    tasks = [demo_1,demo_2,demo_3,demo_4,demo_5]
+    tasks = [demo_1]#,demo_2,demo_3,demo_4,demo_5]
     # tasks = [demo_3]
     fails = list()
     #self.OS.addTasks([demo_1,demo_2,demo_3,demo_4])

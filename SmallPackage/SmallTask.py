@@ -39,7 +39,7 @@ class SmallTask(SmallSignals, Node):
         '''
         self.pid =  -1
         self.priority = priority
-        self.routine = routine
+        self.routine = self.wrap(routine)
         self.isReady = 1
         self.isLocked = 0
         self.parent = None
@@ -65,6 +65,15 @@ class SmallTask(SmallSignals, Node):
                 self.isReady = kwargs['isReady']
         return
 
+
+    def wrap(self, func):
+        def wrapper(self):
+            return_val = {'return_status':0}
+            self.state.update(return_val,'system')
+            func(self)
+            return self.state.getState('return_status','system')[0]
+        return wrapper
+            
 
     def excecute(self):
         '''
