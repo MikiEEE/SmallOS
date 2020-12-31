@@ -1,6 +1,7 @@
 import sys
 import traceback
 import select
+import time
 
 from .SmallIO import SmallIO
 from .OSlist import OSList
@@ -56,6 +57,7 @@ class SmallOS(SmallIO):
         while len(self.tasks) != 0:
             
             sleep_cursor = self.tasks.sleepList
+            
             while sleep_cursor != None:
                 if sleep_cursor.checkSleep() > 0:
                     sleep_cursor.wake()
@@ -82,6 +84,7 @@ class SmallOS(SmallIO):
     def next(self):
         self.cursor = self.tasks.pop()
         return
+
 
     def fork(self,children):
         '''

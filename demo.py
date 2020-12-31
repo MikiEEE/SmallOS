@@ -5,6 +5,7 @@ from shells import baseShell
 
 import pdb, select,sys
 
+
 def update(self):
 
     #Retrieve the system state from the datastore. 
@@ -187,7 +188,7 @@ def sleepDemo( self):
 
 
 
-def sleepAndSuspendDemo( self):
+def sleepAndSuspendDemo(self):
     print('hello')
     self.OS.print('First Phrase','\n')
     self.fork(SmallTask(8,send))
@@ -218,11 +219,11 @@ def execDemo(self):
 
 def loop_demo(self):
     for i in range(100):
-        print(i)
+        self.OS.print(i)
         # yield self.sleep(3)
         if i == 50:
             self.OS.print('Sleeeping...','\n')
-            yield self.sleep(.0001)
+            yield self.sleep(.1)
     # self.OS.tasks.delete(6)
     return
 
@@ -269,7 +270,7 @@ if __name__ == '__main__':
     priority = 2
 
     base = baseShell()
-    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO')
+    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',watcher=True)
     demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
@@ -282,7 +283,7 @@ if __name__ == '__main__':
     OS.setKernel(Unix())
     # pdb.set_trace()
     tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    # tasks = [demo_1,watcher_IO]#,demo_6]
+    tasks = [demo_1,watcher_IO]#,demo_6]
     # tasks = [demo_3]
     fails = list()
     OS.fork(tasks)
