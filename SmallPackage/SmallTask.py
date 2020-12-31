@@ -1,22 +1,12 @@
 import time
 import traceback
 
+from .async_util.iterator_util import is_iterator
+
 from .SmallErrors import PIDError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
 from .taskState import taskState
-
-
-def is_iterator(obj):
-    if (
-            hasattr(obj, '__iter__') and
-            hasattr(obj, '__next__') and 
-            callable(obj.__iter__) and
-            obj.__iter__() is obj
-        ):
-        return True
-    else:
-        return False
 
 
 
@@ -55,6 +45,7 @@ class SmallTask(SmallSignals, Node):
         self.routine = self.wrap(routine)
         self.isReady = 1
         self.isLocked = 0
+        self.watcher = False
         self.parent = None
         self.OS = None
         self.placeholder  = 0
@@ -74,8 +65,11 @@ class SmallTask(SmallSignals, Node):
                 self.updateFunc = kwargs['update']
             if kwargs.get('parent',False):
                 self.parent = kwargs['parent']
-            if 'isReady' in kwargs:
+            if kwargs.get('isReady',False):
                 self.isReady = kwargs['isReady']
+            if kwargs.get('watcher',False):
+                self.watcher = kwargs['watcher']
+
         return
 
 
