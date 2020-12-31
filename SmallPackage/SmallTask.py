@@ -45,7 +45,7 @@ class SmallTask(SmallSignals, Node):
         self.routine = self.wrap(routine)
         self.isReady = 1
         self.isLocked = 0
-        self.watcher = False
+        self.isWatcher = False
         self.parent = None
         self.OS = None
         self.placeholder  = 0
@@ -67,8 +67,8 @@ class SmallTask(SmallSignals, Node):
                 self.parent = kwargs['parent']
             if kwargs.get('isReady',False):
                 self.isReady = kwargs['isReady']
-            if kwargs.get('watcher',False):
-                self.watcher = kwargs['watcher']
+            if kwargs.get('isWatcher',False):
+                self.isWatcher = kwargs['isWatcher']
 
         return
 

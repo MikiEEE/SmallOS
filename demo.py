@@ -260,8 +260,8 @@ if __name__ == '__main__':
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
     #Make cleaner, add adjustable signal lengths, Turn Shell into own process
     #Turn OSlist into Balanced Bin Tree?
-    #work through innerloops.
     #Create config file.
+    #create internal  messaging system
     #remove placeholder class
 
 
