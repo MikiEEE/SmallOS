@@ -109,7 +109,6 @@ class SmallTask(SmallSignals, Node):
         '''
         if not self.routine: return 0
         if self.isReady and not self.isLocked:
-            self.setUpPlace()
             self.isReady = 0
             result = self.routine(self)
             return result   

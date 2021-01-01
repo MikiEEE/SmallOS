@@ -2,11 +2,11 @@
 
 
 
-from .placeHolder import placeHolder
+# from .placeHolder import placeHolder
 
  
 
-class SmallSignals(placeHolder):
+class SmallSignals():
     '''
     @class smallSignals - Class designed to handle all of the 
         signal oriented interprocess communication. 
@@ -117,7 +117,6 @@ class SmallSignals(placeHolder):
             self.state.update(state_blob)
         return_val = {'return_status':1}
         self.state.update(return_val,'system')
-        self.setPlaceholder()
         self.isSleep = 1
         self.OS.tasks.moveToSleepList(self)
 
@@ -185,7 +184,6 @@ class SmallSignals(placeHolder):
         self.wakeSigs.append(sig)
         self.isWaiting = 1
         self.isReady = 0
-        self.setPlaceholder()
         return_val = {'return_status':2}
         self.state.update(return_val,'system')
         return
