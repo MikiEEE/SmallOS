@@ -72,7 +72,7 @@ def send(self):
 
 def forkDemo(self):
     '''
-    @func Fork Demo - demonstrates using small os to be able to 
+    @function Fork Demo - demonstrates using small os to be able to 
         switch between tasks and let routines be executed in the 
         middle of the main task.
 
@@ -144,17 +144,26 @@ def forkDemo(self):
 
 
 def pHDemo(self):
+    '''
+    @function pHDemo - The purpose of this function is to create a demonstration 
+        of allowing functions to suspend until a signal is recieved. 
+    '''
 
+    #Creation of the child process and that will wake up every second and 
+    #send a signal to this process so that It can move onto different phases.
     self.OS.print('First Phrase','\n')
     child = self.OS.fork(SmallTask(8,send,isReady=1,parent=self,update=update, name='sender'))
     yield self.sigSuspendV2(1,{'child':child})
 
+    #Second phase of function. 
     self.OS.print('Second \n')
     yield self.sigSuspendV2(1) 
 
+    #Third phase of function
     self.OS.print('third \n')
     yield self.sigSuspendV2(1) 
 
+    #Fourth phase of function
     self.OS.print('fourth \n')
     pid, status = self.state.getState('child')
     self.OS.tasks.delete(child)
@@ -166,10 +175,14 @@ def pHDemo(self):
 
 
 
-def sleepDemo( self):
-
+def sleepDemo(self):
+    '''
+    @function sleepDemo -  Function demonstrates sleep ability. 
+        ***NOTE***
+        At this time the sleep ability does not support a sleep of 
+        0. This will cause the task to be called in loop. 
+    '''
     self.OS.print('First Phrase','\n')
-    # self.OS.fork(SmallTask(8,send,1,parent=self,update=update21), self)
     nums = [1,3,[5,7,9]]
     yield self.sleep(0,{'nums':nums})
 
@@ -189,6 +202,11 @@ def sleepDemo( self):
 
 
 def sleepAndSuspendDemo(self):
+    '''
+    @function sleepAndSuspendDemo - Function demonstrates ability to
+            spin up new tasks, then sleep, then wake when the child tasks 
+            wake the main task.
+    '''
     print('hello')
     self.OS.print('First Phrase','\n')
     self.fork(SmallTask(8,send))
@@ -208,6 +226,12 @@ def sleepAndSuspendDemo(self):
 
 #@task
 def execDemo(self):
+    '''
+    @function execDemo - Function demonstrates ability to be able to 
+            Execute string commands. 
+    ***NOTE***
+        This is not to be used as of yet.
+    '''
     cmd = '''self.OS.print('HELLO','\\n',self,'\\n')'''
     cmd = compile(cmd,'demo.py','exec')
     exec(cmd)
@@ -218,13 +242,18 @@ def execDemo(self):
 
 
 def loop_demo(self):
+    '''
+    @function loop_demo - demonstrates the ability to be able to 
+            use SMALLOS with loops. 
+    ***NOTE***
+        Will work on timing mechanism of sleep to take in no parameters, 
+        and to make scheduler compatible with this.  
+    '''
     for i in range(100):
-        self.OS.print(i)
-        # yield self.sleep(3)
+        self.OS.print(i,'\n')
         if i == 50:
             self.OS.print('Sleeeping...','\n')
             yield self.sleep(.1)
-    # self.OS.tasks.delete(6)
     return
 
 
@@ -233,15 +262,17 @@ def loop_demo(self):
 
 
 def watcher_IO(self):
-    #This is a high priority watcher function
-    #Its purpose is to poll for IO interactions
-    #and pipe data to the respective running process
-    #
-    #At this stage in project I recommend you  would 
-    #have multiple of these polling for different things.
-    #
-    #In an Ideal setting, using interrupts to wake up tasks
-    #like these would be good.
+    '''
+    @Function watcher_IO - This is a high priority watcher function
+        Its purpose is to poll for IO interactions
+        and pipe data to the respective running process
+        
+        At this stage in project I recommend you  would 
+        have multiple of these polling for different things.
+        
+        In an Ideal setting, using interrupts to wake up tasks
+        like these would be good.
+    '''
     base = baseShell()
     shells = list()
     shells.append(base)
@@ -250,19 +281,14 @@ def watcher_IO(self):
             inpt = sys.stdin.readline()
             for shell in shells:
                 shell.run(self.OS,inpt)
-        yield self.sleep(.0001)
+        yield self.sleep(.01)
     return 
 
 
-if __name__ == '__main__':
-    import traceback
 
-    #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
-    #Make cleaner, add adjustable signal lengths, Turn Shell into own process
-    #Turn OSlist into Balanced Bin Tree?
-    #Create config file.
-    #create internal  messaging system
-    #remove placeholder class
+
+
+if __name__ == '__main__':
 
 
     #Priority is set to 2 to give higher priority (quick) system tasks
@@ -270,7 +296,7 @@ if __name__ == '__main__':
     priority = 2
 
     base = baseShell()
-    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',watcher=True)
+    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',isWatcher=True)
     demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
@@ -279,27 +305,26 @@ if __name__ == '__main__':
     demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
     
     #Instantiate and configure the OS.
-    OS = SmallOS(shells=base)
-    OS.setKernel(Unix())
-    # pdb.set_trace()
+    OS = SmallOS(shells=base) #Set up shell interface
+    OS.setKernel(Unix())      #Set up interface for syscalls
+    OS.setEternalWatchers(False)  #Set to end when only watcher tasks remain.
+
+    #Tasks to be executed.
     tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [demo_1,watcher_IO]#,demo_6]
-    # tasks = [demo_3]
+    # tasks = [demo_6,watcher_IO]
+
     fails = list()
     OS.fork(tasks)
-    # OS.addTasks([demo_4])
-    OS.start()
-    # for num, demo in enumerate(tasks):
-    #     try:
-    #         OS.fork(demo)
-    #         OS.start()
-    #     except: 
-    #         print(traceback.format_exc())
-    #         fails.append(num + 1)
 
-    # if len(fails) == 0:
-    #     print('ALL DEMOS COMPLETED SUCCESSFULLY')
-    # else:
-    #     print(fails)
-    # self.OS.print('\n')
+    OS.start()
+
+
+    #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
+    #Make cleaner, add adjustable signal lengths, Turn Shell into own process
+    #Turn OSlist into Balanced Bin Tree?
+    #Create config file.
+    #create internal  messaging system
+    #remove placeholder class
+    #Allow SmallTask constructor to take in dict onfiguration objects.
+
 
