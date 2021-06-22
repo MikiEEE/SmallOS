@@ -1,6 +1,7 @@
 import sys
 import traceback
 import select
+import time
 
 from .SmallIO import SmallIO
 from .OSlist import OSList
@@ -30,6 +31,7 @@ class SmallOS(SmallIO):
         self.shells = list()
         self.tasks = OSList(10,size)
         self.kernel = None
+        self.eternalWatchers = False
 
         SmallIO.__init__(self, 1024)
         if kwargs:
@@ -50,38 +52,42 @@ class SmallOS(SmallIO):
         @return void
         '''
         self.tasks.resetCatSel()
-        cursor = self.tasks.pop()
+        self.cursor = self.tasks.pop()
 
         while len(self.tasks) != 0:
-
-            if select.select([sys.stdin,],[],[],0.0)[0]:
-                inpt = sys.stdin.readline()
-                for shell in self.shells:
-                    shell.run(self,inpt)
-
             
             sleep_cursor = self.tasks.sleepList
+            
             while sleep_cursor != None:
                 if sleep_cursor.checkSleep() > 0:
-                    print(sleep_cursor)
                     sleep_cursor.wake()
                 sleep_cursor = sleep_cursor.next
 
-            if cursor != None:
-                update = cursor.update() 
+            if self.cursor != None:
+                update = self.cursor.update() 
 
                 result = -1  
-                if cursor.getExeStatus():
-                    result = cursor.excecute()
+                if self.cursor.getExeStatus():
+                    result = self.cursor.excecute()
                 
-                if update == -1 and result == 0 and cursor.getDelStatus():
-                    self.tasks.delete(cursor.pid)
+                if update == -1 and result == 0 and self.cursor.getDelStatus():
+                    self.cursor.kill()
 
-                cursor = self.tasks.pop()
+                    if not self.eternalWatchers and self.tasks.isOnlyWatchers():
+                        return 
+            
+                self.cursor = self.tasks.pop()
 
-            if cursor == None: 
+
+
+            if self.cursor == None: 
                 self.tasks.resetCatSel()
-                cursor = self.tasks.pop()
+                self.cursor = self.tasks.pop()
+        return
+
+
+    def next(self):
+        self.cursor = self.tasks.pop()
         return
 
 
@@ -93,7 +99,7 @@ class SmallOS(SmallIO):
         '''
         if isinstance(children,list):
             ids = list()
-            for item in childern:
+            for item in children:
                 pid = self.tasks.insert(item)
                 if pid != - 1: 
                     item.setOS(self)
@@ -111,6 +117,15 @@ class SmallOS(SmallIO):
             of other resources.
         '''
         self.kernel = kernel
+        return 
+
+
+    def setEternalWatchers(self,isEternalWatcherPresent):
+        '''
+        @param num_watchers - int - the number of watchers that never die
+            in the OS. 
+        '''
+        self.eternalWatchers = isEternalWatcherPresent
         return 
 
 

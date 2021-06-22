@@ -1,10 +1,13 @@
 import time
 import traceback
 
+from .async_util.iterator_util import is_iterator
+
 from .SmallErrors import PIDError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
 from .taskState import taskState
+
 
 
 class SmallTask(SmallSignals, Node):
@@ -39,13 +42,15 @@ class SmallTask(SmallSignals, Node):
         '''
         self.pid =  -1
         self.priority = priority
-        self.routine = routine
+        self.routine = self.wrap(routine)
         self.isReady = 1
         self.isLocked = 0
+        self.isWatcher = False
         self.parent = None
         self.OS = None
         self.placeholder  = 0
         self.state = taskState()
+        self.children = list()
 
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
@@ -61,10 +66,40 @@ class SmallTask(SmallSignals, Node):
                 self.updateFunc = kwargs['update']
             if kwargs.get('parent',False):
                 self.parent = kwargs['parent']
-            if 'isReady' in kwargs:
+            if kwargs.get('isReady',False):
                 self.isReady = kwargs['isReady']
+            if kwargs.get('isWatcher',False):
+                self.isWatcher = kwargs['isWatcher']
+
         return
 
+
+    def wrap(self, func):
+        def wrapper(self):
+            #Set the return value to the OS.
+            return_val = {'return_status':0}
+            self.state.update(return_val,'system')
+
+            data = self.state.getState('has_run','system')
+
+            if is_iterator(func(self)):
+                try:
+                    if data[1] == -1:
+                        blob = {'has_run':1}
+                        self.state.update(blob,'system')
+                        self.f = func(self)
+                        next(self.f)
+
+                    else:
+                        self.f.send(None)
+
+                except StopIteration as e:
+                    self.f.close()
+            else: 
+                func(self)
+            return self.state.getState('return_status','system')[0]
+        return wrapper
+            
 
     def excecute(self):
         '''
@@ -75,7 +110,6 @@ class SmallTask(SmallSignals, Node):
         '''
         if not self.routine: return 0
         if self.isReady and not self.isLocked:
-            self.setUpPlace()
             self.isReady = 0
             result = self.routine(self)
             return result   
@@ -97,7 +131,6 @@ class SmallTask(SmallSignals, Node):
         if self.updateFunc:
             if self.updateFunc(self) == 1:
                 self.isReady = 1
-                self.placeHolderReset()
             return 0
         else:
             return -1
@@ -154,7 +187,19 @@ class SmallTask(SmallSignals, Node):
 
         new_task.parent = self
         pid = self.OS.fork(new_task)
+        self.children.append(pid)
         return pid
+
+
+    def kill(self, flags={}):
+
+        if not self.OS: return -1
+
+        if '-r' in flags:
+            for child in self.children:
+                child.kill()
+         
+        self.OS.tasks.delete(self.getID())
 
 
     def getExeStatus(self):
