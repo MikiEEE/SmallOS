@@ -89,6 +89,7 @@ class OSList(smallPID):
         self.current = None
         self.sleepList = None
         self.func = lambda data, index: data[index].getID()
+        self.numWatchers = 0
         return 
 
 
@@ -170,6 +171,7 @@ class OSList(smallPID):
 
         if self.current != None and self.current.priority >  self.catSelect:
             self.catSelect = self.current.priority
+
         return self.current
 
 
@@ -188,6 +190,10 @@ class OSList(smallPID):
             if pid == -1: return -1
 
             task.setID(pid)
+
+            if task.isWatcher:
+                self.numWatchers += 1
+
             length = len(self.tasks)
 
             index = insert(self.tasks,pid,0,length,func=self.func)
@@ -239,7 +245,14 @@ class OSList(smallPID):
         if self.cats[priority].getID() == self.tasks[index].getID():
             self.cats[priority] = self.cats[priority].next
 
+        if self.tasks[index].isWatcher:
+            self.numWatchers -= 1
+
+        if self.numWatchers < 0:
+            raise ValueError('There cannot be negative number of watchers.')
+
         del self.tasks[index]
+
         self.freePID(pid)
         return 0
 
@@ -298,6 +311,19 @@ class OSList(smallPID):
             insertNext(self.cats[priority],woken_task)
 
         return self.setCatSel(priority)
+
+
+    def isOnlyWatchers(self):
+        '''
+        @function isOnlyWatchers - Determines if all of the tasks in the OSlist 
+            are watcher tasks. 
+        @return True - Bool() - if all tasks are watchers. Otherwise False.
+        '''
+        numTasks = len(self.tasks)
+
+        if numTasks == self.numWatchers:
+            return True
+        return False
 
 
     def __len__(self):

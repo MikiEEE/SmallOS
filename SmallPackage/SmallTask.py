@@ -50,6 +50,7 @@ class SmallTask(SmallSignals, Node):
         self.OS = None
         self.placeholder  = 0
         self.state = taskState()
+        self.children = list()
 
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
@@ -130,7 +131,6 @@ class SmallTask(SmallSignals, Node):
         if self.updateFunc:
             if self.updateFunc(self) == 1:
                 self.isReady = 1
-                self.placeHolderReset()
             return 0
         else:
             return -1
@@ -187,7 +187,19 @@ class SmallTask(SmallSignals, Node):
 
         new_task.parent = self
         pid = self.OS.fork(new_task)
+        self.children.append(pid)
         return pid
+
+
+    def kill(self, flags={}):
+
+        if not self.OS: return -1
+
+        if '-r' in flags:
+            for child in self.children:
+                child.kill()
+         
+        self.OS.tasks.delete(self.getID())
 
 
     def getExeStatus(self):

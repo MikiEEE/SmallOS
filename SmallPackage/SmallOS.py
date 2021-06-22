@@ -31,7 +31,7 @@ class SmallOS(SmallIO):
         self.shells = list()
         self.tasks = OSList(10,size)
         self.kernel = None
-        self.eternal_watchers = 0
+        self.eternalWatchers = False
 
         SmallIO.__init__(self, 1024)
         if kwargs:
@@ -71,9 +71,14 @@ class SmallOS(SmallIO):
                     result = self.cursor.excecute()
                 
                 if update == -1 and result == 0 and self.cursor.getDelStatus():
-                    self.tasks.delete(self.cursor.getID())
+                    self.cursor.kill()
 
+                    if not self.eternalWatchers and self.tasks.isOnlyWatchers():
+                        return 
+            
                 self.cursor = self.tasks.pop()
+
+
 
             if self.cursor == None: 
                 self.tasks.resetCatSel()
@@ -115,26 +120,13 @@ class SmallOS(SmallIO):
         return 
 
 
-    def setEternalWatchers(self,num_watchers):
+    def setEternalWatchers(self,isEternalWatcherPresent):
         '''
         @param num_watchers - int - the number of watchers that never die
             in the OS. 
         '''
-        self.eternal_watchers = num_watchers
+        self.eternalWatchers = isEternalWatcherPresent
         return 
-
-
-    def killWhenOnlyWatchers(self):
-        '''
-        @function killWhenOnlyWatchers() - ends runtime when only the
-            watcher tasks are alive. 
-        
-        '''
-        # if len(self.OS.tasks) > 0 and len(self.OS.tasks) == self.num_watchers:
-        #     cursor = tasks
-        #     while len(self.tasks) != 0:
-        pass
-
 
 
     def __str__(self):
