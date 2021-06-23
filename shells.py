@@ -3,6 +3,11 @@ import sys
 import pdb  
 
 
+'''
+This is just an example of a shell and I intend to make this much more
+Robust
+'''
+
 class baseShell():
 
 	def __init__(self):
