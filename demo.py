@@ -1,9 +1,11 @@
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
-from shells import baseShell
+from shells import BaseShell
 
-import pdb, select,sys
+import pdb, select,sys, socket, asyncio
+
+NETWORK_SIGNAL=5
 
 
 def update(self):
@@ -273,20 +275,90 @@ def watcher_IO(self):
         In an Ideal setting, using interrupts to wake up tasks
         like these would be good.
     '''
-    base = baseShell()
-    shells = list()
-    shells.append(base)
     while 1:
         if select.select([sys.stdin,],[],[],0.0)[0]:
             inpt = sys.stdin.readline()
-            for shell in shells:
-                shell.run(self.OS,inpt)
+            for shell in self.OS.shells:
+                shell.run(inpt)
         yield self.sleep(.01)
+    return 
+
+
+def make_request(self,http_request_config):
+    '''
+        Sets up a socket connection and makes a requets.
+        returns a socket connection. 
+        Should fork off a new task that reads the request and then
+        go to sleep, needs to wake up the original task when finished.
+        End of Function must make a call to self.sigsuspendv2()
+        Must be yeilded after.
+    '''
+        # Create a socket
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # Connect to the server
+    client_socket.connect((http_request_config.get('host'),http_request_config.get('port' )))
+
+    # Send the HTTP request
+    request = f"GET {http_request_config.get('path')} HTTP/1.1\r\nHost: {http_request_config.get('host')}\r\nConnection: close\r\n\r\n"
+    client_socket.sendall(request.encode())
+
+
+    read_task = SmallTask(1,read_request,args=(client_socket,), parent=self)
+    self.OS.fork(read_task)
+
     return 
 
 
 
 
+def read_request(self):
+    '''
+        Takes in the socket connection from make request and reads it non 
+        blocking otherwise  sleeps
+        When finished  writes data to parent task & sends a signal to wake the parent task 
+    '''
+
+    client_socket = self.args[0] #Get client socket from args passed in on task creation see make_request()
+
+    client_socket.setblocking(False)
+
+    response = b''
+    while True:
+        try:
+            data = client_socket.recv(1024)
+            if not data:
+                break
+            response += data
+        except BlockingIOError:
+            yield self.sleep(.001)
+
+    # Close the connection
+    client_socket.close()
+
+    self.parent.state.update({'message_response':response})
+    self.sendSignal(self.parent.pid, NETWORK_SIGNAL)
+    return 
+
+
+def networkDemo(self):
+    self.OS.print('Starting network request\n')
+    make_request(self,{
+        'host': 'www.google.com',
+        'port':80,
+        'path':'/'
+    })
+    self.OS.print('Doing Something Else\n')
+    yield self.sigSuspendV2(NETWORK_SIGNAL)
+    print(self.state.getState(None)[:10])
+
+
+def printer(self):
+    while 1:
+        self.OS.print('Waiting for response\n')
+        yield self.sleep(1)
+
+# def asyncioDemo
 
 if __name__ == '__main__':
 
@@ -295,23 +367,25 @@ if __name__ == '__main__':
     #such as a2d reading input checking a chance to run quickly.  
     priority = 2
 
-    base = baseShell()
+    base = BaseShell()
     watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',isWatcher=True)
-    demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
-    demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
-    demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
-    demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
-    demo_5 = SmallTask(priority,execDemo,name='Parent5')
-    demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
+    # demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
+    # demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
+    # demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
+    # demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
+    # demo_5 = SmallTask(priority,execDemo,name='Parent5')
+    # demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
+    demo_7 = SmallTask(priority+2,networkDemo,name='Parent7')
+    demo_8 = SmallTask(2,printer,name='printer')
     
     #Instantiate and configure the OS.
-    OS = SmallOS(shells=base) #Set up shell interface
+    OS = SmallOS(shells=[base]) #Set up shell interface
     OS.setKernel(Unix())      #Set up interface for syscalls
-    OS.setEternalWatchers(False)  #Set to end when only watcher tasks remain.
+    OS.setEternalWatchers(True)  #Set to end when only watcher tasks remain.
 
     #Tasks to be executed.
-    tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    # tasks = [demo_6,watcher_IO]
+    # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
+    tasks = [demo_7,demo_8,watcher_IO]
 
     fails = list()
     OS.fork(tasks)
@@ -320,6 +394,7 @@ if __name__ == '__main__':
 
 
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
+    #Make watchers run after each task on option
     #Make cleaner, add adjustable signal lengths, Turn Shell into own process
     #Turn OSlist into Balanced Bin Tree?
     #Create config file.

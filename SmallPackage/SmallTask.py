@@ -39,6 +39,7 @@ class SmallTask(SmallSignals, Node):
                 perform actions during the event of a signal being
                 recieved.
             @arg parent - task() - parent task that spawned this current task
+            @arg args - tuple(obj) - list of arguments to be passed in when routine is called.
         '''
         self.pid =  -1
         self.priority = priority
@@ -70,6 +71,8 @@ class SmallTask(SmallSignals, Node):
                 self.isReady = kwargs['isReady']
             if kwargs.get('isWatcher',False):
                 self.isWatcher = kwargs['isWatcher']
+            if kwargs.get('args',False):
+                self.args = kwargs['args']
 
         return
 
@@ -96,7 +99,10 @@ class SmallTask(SmallSignals, Node):
                 except StopIteration as e:
                     self.f.close()
             else: 
-                func(self)
+                # I am not sure if this is a bug maybe running twice 
+                # Maybe running twice once on is_iterator() check then twice in the else.
+                # func(self) 
+                pass
             return self.state.getState('return_status','system')[0]
         return wrapper
             
