@@ -1,4 +1,4 @@
-import time
+import time, asyncio
 import traceback
 
 from .async_util.iterator_util import is_iterator
@@ -53,6 +53,11 @@ class SmallTask(SmallSignals, Node):
         self.state = taskState()
         self.children = list()
 
+        #Async
+        self.asyncTaskHandle = None
+        self.isInProgress = 0 
+
+
         #NEEDS to be changed to function with state preserved in the task
         self.updateFunc = None
 
@@ -85,24 +90,30 @@ class SmallTask(SmallSignals, Node):
 
             data = self.state.getState('has_run','system')
 
-            if is_iterator(func(self)):
-                try:
-                    if data[1] == -1:
-                        blob = {'has_run':1}
-                        self.state.update(blob,'system')
-                        self.f = func(self)
-                        next(self.f)
+            if data[1] == -1:
+                blob = {'has_run':1}
+                self.state.update(blob,'system')
+                self.isInProgress = 1
+                self.asyncTaskHandle = asyncio.create_task(func(self))
 
-                    else:
-                        self.f.send(None)
+            # if is_iterator(func(self)):
+            #     try:
+            #         if data[1] == -1:
+            #             blob = {'has_run':1}
+            #             self.state.update(blob,'system')
+            #             self.f = func(self)
+            #             next(self.f)
 
-                except StopIteration as e:
-                    self.f.close()
-            else: 
-                # I am not sure if this is a bug maybe running twice 
-                # Maybe running twice once on is_iterator() check then twice in the else.
-                # func(self) 
-                pass
+            #         else:
+            #             self.f.send(None)
+
+            #     except StopIteration as e:
+            #         self.f.close()
+            # else: 
+            #     # I am not sure if this is a bug maybe running twice 
+            #     # Maybe running twice once on is_iterator() check then twice in the else.
+            #     # func(self) 
+            #     pass
             return self.state.getState('return_status','system')[0]
         return wrapper
             
@@ -197,15 +208,15 @@ class SmallTask(SmallSignals, Node):
         return pid
 
 
-    def kill(self, flags={}):
-
+    async def kill(self, flags={}):
+        self.asyncTaskHandle.cancel()
         if not self.OS: return -1
 
         if '-r' in flags:
             for child in self.children:
                 child.kill()
          
-        self.OS.tasks.delete(self.getID())
+        await self.OS.tasks.delete(self.getID())
 
 
     def getExeStatus(self):
@@ -216,7 +227,7 @@ class SmallTask(SmallSignals, Node):
             it is not. 
         '''
         status = (self.isReady == 1) and (self.isWaiting == 0)
-        status = status and (self.isSleep == 0)
+        status &= (self.isSleep == 0) and (self.isInProgress == 0)
         return status 
 
 
@@ -228,7 +239,7 @@ class SmallTask(SmallSignals, Node):
             it can not.       
         '''
         status = (self.isReady == 0) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0)
+        status &= (self.isSleep == 0) and self.asyncTaskHandle.done()
         return status 
 
 

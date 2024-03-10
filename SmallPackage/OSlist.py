@@ -179,7 +179,7 @@ class OSList(SmallPID):
         return self.tasks[index]
 
 
-    def delete(self,pid):
+    async def delete(self,pid):
         '''
         @function delete() - performs binary search to find and delete a process
             by pid.
@@ -202,7 +202,7 @@ class OSList(SmallPID):
 
         if self.numWatchers < 0:
             raise ValueError('There cannot be negative number of watchers.')
-
+        
         del self.tasks[index]
 
         self.freePID(pid)
