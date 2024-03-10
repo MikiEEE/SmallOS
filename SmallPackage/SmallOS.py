@@ -41,8 +41,11 @@ class SmallOS(SmallIO):
             if kwargs.get('shells',False):
                 shells = kwargs['shells']
                 if isinstance(shells, list):
+                    #Should throw error is setOS doesnt exist.
+                    [shell.setOS(self) for shell in shells]
                     self.shells.extend(shells) 
                 else:
+                    shells.setOS(self)
                     self.shells.append(shells) 
 
 
