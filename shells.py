@@ -22,7 +22,7 @@ class BaseShell():
 		self.OS = OS
 		return
 
-	def run(self, inpt):
+	async def run(self, inpt):
 		inpt_set = set(inpt.split())
 		if 'sw' in inpt_set:
 			# pdb.set_trace()
@@ -44,7 +44,7 @@ class BaseShell():
 		if 'exit' in inpt_set:
 			sys.exit(0)
 		if 'kill' in inpt_set:
-			self.OS.tasks.delete(int(inpt.split()[-1]))
+			await self.OS.tasks.search(int(inpt.split()[-1])).kill()
 		# if ''.join(inpt) != '':
 
 		if 'exec' in inpt_set:

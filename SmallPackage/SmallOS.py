@@ -2,6 +2,7 @@ import sys
 import traceback
 import select
 import time
+import asyncio
 
 from .SmallIO import SmallIO
 from .OSlist import OSList
@@ -49,7 +50,7 @@ class SmallOS(SmallIO):
                     self.shells.append(shells) 
 
 
-    def start(self):
+    async def start(self):
         '''
         @function start() - starts the OS
         @return void
@@ -74,11 +75,11 @@ class SmallOS(SmallIO):
                     result = self.cursor.excecute()
                 
                 if update == -1 and result == 0 and self.cursor.getDelStatus():
-                    self.cursor.kill()
+                    await self.cursor.kill()
 
                     if not self.eternalWatchers and self.tasks.isOnlyWatchers():
                         return 
-            
+                await asyncio.sleep(.1)
                 self.cursor = self.tasks.pop()
 
 

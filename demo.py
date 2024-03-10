@@ -353,12 +353,37 @@ def networkDemo(self):
     print(self.state.getState(None)[:10])
 
 
-def printer(self):
-    while 1:
-        self.OS.print('Waiting for response\n')
-        yield self.sleep(1)
+async def printer(self):
+    try:
+        while 1:
+            self.OS.print("Task is running...\n")
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        self.OS.print("Task is cancelled.\n")
 
-# def asyncioDemo
+async def asyncioDemo(self):
+    logger = aiologger.Logger.with_default_handlers(name="asyncioDemo")
+    url = 'http://www.google.com'
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            text = await response.text()
+            logger.info(text)
+
+async def async_watcher_IO(self):
+    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader()
+    reader_protocol = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+
+    while True:
+        inpt = await reader.readline()
+        if inpt:
+            inpt = inpt.decode('utf-8')
+            for shell in self.OS.shells:
+                await shell.run(inpt)
+            # print('INPUT', inpt)
+        await asyncio.sleep(0.01)
+
 
 if __name__ == '__main__':
 
@@ -368,15 +393,17 @@ if __name__ == '__main__':
     priority = 2
 
     base = BaseShell()
-    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',isWatcher=True)
+    watcher_IO =  SmallTask(priority-1,async_watcher_IO,isReady=1,name='watcher_IO',isWatcher=True)
     # demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     # demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     # demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
     # demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
     # demo_5 = SmallTask(priority,execDemo,name='Parent5')
     # demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
-    demo_7 = SmallTask(priority+2,networkDemo,name='Parent7')
+    # demo_7 = SmallTask(priority+2,networkDemo,name='Parent7')
     demo_8 = SmallTask(2,printer,name='printer')
+    demo_9 = SmallTask(priority+2,asyncioDemo,name='Parent9')
+
     
     #Instantiate and configure the OS.
     OS = SmallOS(shells=[base]) #Set up shell interface
@@ -385,14 +412,24 @@ if __name__ == '__main__':
 
     #Tasks to be executed.
     # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [demo_7,demo_8,watcher_IO]
+    tasks = [demo_8,watcher_IO]
 
-    fails = list()
+    handle = None
+    # async def test():
+    #     demo_8.excecute()
+    #     watcher_IO.excecute()
+    #     while 1:
+    #         await asyncio.sleep(1)
+    #     # await demo_8.asyncTaskHandle
+    #     # await watcher_IO.asyncTaskHandle
+    # asyncio.run(test())
+
+    # fails = list()
     OS.fork(tasks)
 
-    OS.start()
+    asyncio.run(OS.start())
 
-
+    #Test how aync tasks also work with yeild. Maybe check for async handle and if it exists  then just call generator next?
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
     #Make watchers run after each task on option
     #Make cleaner, add adjustable signal lengths, Turn Shell into own process
