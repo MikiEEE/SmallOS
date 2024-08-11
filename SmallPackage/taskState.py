@@ -6,7 +6,7 @@ File Deprecated as of concurrency branch update.
 '''
 
 
-class taskState():
+class TaskState():
 
     '''
     @class taskState - state management class for keeping track of 

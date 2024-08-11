@@ -3,7 +3,7 @@ from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
 from shells import BaseShell
 
-import pdb, select,sys, socket, asyncio
+import pdb, select,sys, socket, asyncio,aiohttp
 
 NETWORK_SIGNAL=5
 
@@ -354,20 +354,29 @@ def networkDemo(self):
 
 
 async def printer(self):
-    try:
-        while 1:
-            self.OS.print("Task is running...\n")
-            await asyncio.sleep(1)
-    except asyncio.CancelledError:
-        self.OS.print("Task is cancelled.\n")
+    while 1:
+        self.OS.print("Task is running...\n")
+        await asyncio.sleep(1)
 
 async def asyncioDemo(self):
-    logger = aiologger.Logger.with_default_handlers(name="asyncioDemo")
-    url = 'http://www.google.com'
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            text = await response.text()
-            logger.info(text)
+    try:
+        async def func():
+            url = 'http://www.google.com'
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    text = await response.text()
+                    return text
+        data = await func()
+        loop = asyncio.get_event_loop()
+
+        async def print_in_batches(string, batch_size=1):
+            for i in range(0, len(string), batch_size):
+                sys.stdout.write(string[i:i+batch_size])
+                sys.stdout.flush()
+                await asyncio.sleep(0)
+        await print_in_batches(data)
+    except Exception as e:
+        print(e)
 
 async def async_watcher_IO(self):
     loop = asyncio.get_running_loop()
@@ -412,22 +421,15 @@ if __name__ == '__main__':
 
     #Tasks to be executed.
     # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [demo_8,watcher_IO]
+    tasks = [demo_8,demo_9,watcher_IO]
 
     handle = None
-    # async def test():
-    #     demo_8.excecute()
-    #     watcher_IO.excecute()
-    #     while 1:
-    #         await asyncio.sleep(1)
-    #     # await demo_8.asyncTaskHandle
-    #     # await watcher_IO.asyncTaskHandle
-    # asyncio.run(test())
 
     # fails = list()
     OS.fork(tasks)
 
     asyncio.run(OS.start())
+    # asyncio.run(asyncioDemo(None))
 
     #Test how aync tasks also work with yeild. Maybe check for async handle and if it exists  then just call generator next?
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
