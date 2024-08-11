@@ -79,7 +79,7 @@ class SmallOS(SmallIO):
 
                     if not self.eternalWatchers and self.tasks.isOnlyWatchers():
                         return 
-                await asyncio.sleep(.1)
+                await asyncio.sleep(0)
                 self.cursor = self.tasks.pop()
 
 

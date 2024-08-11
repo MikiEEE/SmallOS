@@ -6,7 +6,7 @@ from .async_util.iterator_util import is_iterator
 from .SmallErrors import PIDError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
-from .taskState import taskState
+from .TaskState import TaskState
 
 
 
@@ -50,7 +50,7 @@ class SmallTask(SmallSignals, Node):
         self.parent = None
         self.OS = None
         self.placeholder  = 0
-        self.state = taskState()
+        self.state = TaskState()
         self.children = list()
 
         #Async
@@ -63,7 +63,7 @@ class SmallTask(SmallSignals, Node):
 
         SmallSignals.__init__(self,self.OS,kwargs)
         Node.__init__(self)
-        taskState.__init__(self)
+        TaskState.__init__(self)
 
         if kwargs:
             if kwargs.get('name',False):
@@ -90,11 +90,17 @@ class SmallTask(SmallSignals, Node):
 
             data = self.state.getState('has_run','system')
 
+            async def newRoutine(self):
+                try:
+                   await  func(self)
+                except asyncio.CancelledError:
+                    self.isInProgress = 0
+
             if data[1] == -1:
                 blob = {'has_run':1}
                 self.state.update(blob,'system')
                 self.isInProgress = 1
-                self.asyncTaskHandle = asyncio.create_task(func(self))
+                self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
 
             # if is_iterator(func(self)):
             #     try:
