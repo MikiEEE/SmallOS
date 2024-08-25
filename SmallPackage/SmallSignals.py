@@ -18,7 +18,7 @@ class SmallSignals():
         '''
 
         #Need to add adjustable signal length of signal vector.
-        self.signals = [0] * 32
+        self.signals = [0] * 32  #[0,0,0,0,0,(5)async_wait,0]
         self.isWaiting = 0
         self.isSleep = 0
         self.wakeSigs = list()
@@ -174,7 +174,7 @@ class SmallSignals():
             getPlace() code block. 
         @param OS - smallOS - OS object that manages tasks.
         @param state_blob - dict - variables to be saved when the next placeholder
-            is executed. 
+            is executed. Data only
         @return - void
 
         '''
@@ -184,8 +184,9 @@ class SmallSignals():
         self.wakeSigs.append(sig)
         self.isWaiting = 1
         self.isReady = 0
-        return_val = {'return_status':2}
-        self.state.update(return_val,'system')
+        system_state, _ = self.state.getState(None,'system')
+        system_state['return_status'] = 2
+        self.state.update(system_state,'system')
         return
 
 

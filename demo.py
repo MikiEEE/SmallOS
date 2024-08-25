@@ -393,10 +393,21 @@ async def async_watcher_IO(self):
             # print('INPUT', inpt)
         await asyncio.sleep(0.01)
 
+async def create_async_tasks(self):
+    one = 1
+    self.OS.print('IIII\n')
+    async def sleepwait(self):
+        self.OS.print('HELLO\n')
+        start  = 1
+        while start < 10:
+            await asyncio.sleep(1)
+            self.OS.print('create task test sleeping\n')
+            start += 1 
+
+    await self.waitOnAsync([sleepwait])
+    self.OS.print('done\n')
 
 if __name__ == '__main__':
-
-
     #Priority is set to 2 to give higher priority (quick) system tasks
     #such as a2d reading input checking a chance to run quickly.  
     priority = 2
@@ -410,8 +421,8 @@ if __name__ == '__main__':
     # demo_5 = SmallTask(priority,execDemo,name='Parent5')
     # demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
     # demo_7 = SmallTask(priority+2,networkDemo,name='Parent7')
-    demo_8 = SmallTask(2,printer,name='printer')
-    demo_9 = SmallTask(priority+2,asyncioDemo,name='Parent9')
+    # demo_8 = SmallTask(2,printer,name='printer')
+    demo_9 = SmallTask(priority+2,create_async_tasks,name='Parent9')
 
     
     #Instantiate and configure the OS.
@@ -421,7 +432,7 @@ if __name__ == '__main__':
 
     #Tasks to be executed.
     # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [demo_8,demo_9,watcher_IO]
+    tasks = [demo_9,watcher_IO]
 
     handle = None
 
