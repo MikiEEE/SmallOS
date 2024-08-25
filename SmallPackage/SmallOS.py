@@ -74,7 +74,9 @@ class SmallOS(SmallIO):
                 if self.cursor.getExeStatus():
                     result = self.cursor.excecute()
                 
-                if update == -1 and result == 0 and self.cursor.getDelStatus():
+                return_status, _ = self.cursor.state.getState('return_status','system')
+                
+                if update == -1 and (result == 0 or return_status == 0) and self.cursor.getDelStatus():
                     await self.cursor.kill()
 
                     if not self.eternalWatchers and self.tasks.isOnlyWatchers():
