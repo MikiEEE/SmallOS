@@ -179,7 +179,7 @@ class OSList(SmallPID):
         return self.tasks[index]
 
 
-    async def delete(self,pid):
+    def delete(self,pid):
         '''
         @function delete() - performs binary search to find and delete a process
             by pid.

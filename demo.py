@@ -5,7 +5,7 @@ from shells import BaseShell
 
 import pdb, select,sys, socket, asyncio,aiohttp
 
-NETWORK_SIGNAL=5
+NETWORK_SIGNAL=3
 
 
 def update(self):
@@ -393,18 +393,18 @@ async def async_watcher_IO(self):
             # print('INPUT', inpt)
         await asyncio.sleep(0.01)
 
-async def create_async_tasks(self):
+def create_async_tasks(self):
     one = 1
     self.OS.print('IIII\n')
     async def sleepwait(self):
         self.OS.print('HELLO\n')
         start  = 1
-        while start < 10:
+        while start < 3:
             await asyncio.sleep(1)
-            self.OS.print('create task test sleeping\n')
+            self.OS.print('create task test sleeping '+str(start)+'\n')
             start += 1 
 
-    await self.waitOnAsync([sleepwait])
+    yield self.waitOnAsync([sleepwait])
     self.OS.print('done\n')
 
 if __name__ == '__main__':
@@ -413,7 +413,7 @@ if __name__ == '__main__':
     priority = 2
 
     base = BaseShell()
-    watcher_IO =  SmallTask(priority-1,async_watcher_IO,isReady=1,name='watcher_IO',isWatcher=True)
+    watcher_IO =  SmallTask(priority-1,async_watcher_IO,isReady=1,name='watcher_IO',isWatcher=True, isAsync=1)
     # demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     # demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     # demo_3 = SmallTask(priority,sleepDemo, name='Parent3')

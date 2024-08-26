@@ -44,7 +44,7 @@ class BaseShell():
 		if 'exit' in inpt_set:
 			sys.exit(0)
 		if 'kill' in inpt_set:
-			await self.OS.tasks.search(int(inpt.split()[-1])).kill()
+			self.OS.tasks.search(int(inpt.split()[-1])).kill()
 		# if ''.join(inpt) != '':
 
 		if 'exec' in inpt_set:
