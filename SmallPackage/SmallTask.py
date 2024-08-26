@@ -66,6 +66,7 @@ class SmallTask(SmallSignals, Node):
         #Async
         self.asyncTaskHandle = None
         self.isInProgress = 0 
+        self.isAsync = False
 
 
         #NEEDS to be changed to function with state preserved in the task
@@ -82,7 +83,9 @@ class SmallTask(SmallSignals, Node):
                 self.isReady = kwargs['isReady']
             if kwargs.get('isWatcher',False):
                 self.isWatcher = kwargs['isWatcher']
-            if kwargs.get('args',False):
+            if kwargs.get('isAsync', False):
+                self.isAsync = kwargs['isAsync']
+            if kwargs.get('args', False):
                 self.args = kwargs['args']
 
         return
@@ -92,24 +95,37 @@ class SmallTask(SmallSignals, Node):
         def wrapper(self):
 
             data = self.state.getState(None,'system')
-
-            async def newRoutine(self):
+            if self.isAsync: 
+                async def newRoutine(self):
+                    try:
+                        await func(self)
+                    except asyncio.CancelledError as e:
+                        self.isInProgress = 0
+                    except Exception as e:
+                        raise e
+                    finally:
+                        self.isInProgress = 0
+                        
+                if data[0].get('has_run',-1) == -1:
+                    blob = data[0]
+                    blob['has_run'] = 1
+                    self.state.update(blob,'system')
+                    self.isInProgress = 1
+                    self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
+            elif is_iterator(func(self)):
                 try:
-                   await func(self)
-                except asyncio.CancelledError:
-                    self.isInProgress = 0
-                except Exception as e:
-                    raise e
-                finally:
-                    self.isInProgress = 0
-                    
+                    if data[0].get('has_run',-1) == -1:
+                        blob = {'has_run':1}
+                        self.state.update(blob,'system')
+                        self.f = func(self)
+                        next(self.f)
+                    else:
+                        self.f.send(None)
 
-            if data[0].get('has_run',-1) == -1:
-                blob = data[0]
-                blob['has_run'] = 1
-                self.state.update(blob,'system')
-                self.isInProgress = 1
-                self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
+                except StopIteration as e:
+                    self.f.close()
+            else:
+                func(self)
             return self.state.getState('return_status','system')[0]
         return wrapper
             
@@ -207,55 +223,94 @@ class SmallTask(SmallSignals, Node):
         self.children.append(pid)
         return pid
     
+    ##Change this into a function that is a generator that 
+    # spanws a process that spawns off the children and then wrap the children so that when they are 
+    # done they trigger a signal handler in the generator process that records it as done and then
+    # checks status of all other children. When they are done, feed the data to this process 
+    # so that the original task in the demo can call next() on the waitOnasync function and get an array
+    # of results. 
+    def waitOnAsync(self, newTasks, priority=None):
+   
+        def wrapChildren(routine):
+            async def newRoutine(self):
+                await routine(self)
+                parentPid = self.parent.getID()
+                result = self.sendSignal(parentPid,6)
+                if result != 0:
+                    data = self.state.getState(None,'system')[0]
+                    data['return_status'] = -1
+                    self.state.update(data,'system')
+                return
+            return newRoutine
+        
+        def handleFinishedAsync(self):
+            if self.checkSignal(6):
+                flag = True
+                pids = self.state.getState('pids')[0]
+                for pid in pids:
+                    child = self.OS.tasks.search(pid)
+                    if child == -1:
+                        flag &= True 
+                    else:
+                        flag &= bool(child.asyncTaskHandle) and child.asyncTaskHandle.done()
+                if flag:
+                    self.sendSignal(self.getID(), 7)
+            return
 
-    async def waitOnAsync(self, newTasks):
-        pids = []
+        def spawnerRoutine(self):
+            name = 'ChildOf ' + str(self.getID())
+            pids = []
+            for asyncTask in self.args['tasks']:
+                task = SmallTask(priority,
+                                    wrapChildren(asyncTask),
+                                    name=name,
+                                    isAsync=1)
+                pids.append(self.fork(task))
+            self.state.update({'pids':pids})
+            yield self.sigSuspendV2(7)
+            self.sendSignal(self.parent.getID(),5)
+            return 
+        
+        if not priority:
+            priority = self.priority
+
         parentPid = self.getID()
-        name = str(self.getID())+'child'
+        name = 'ChildOf ' + str(self.getID())
 
         self.sigSuspendV2(5)
 
-        for asyncTask in newTasks:
-            task = SmallTask(self.priority,
-                                asyncTask,
-                                name=name)
-            pids.append(self.fork(task))
-        
+        args = {
+            "tasks": newTasks,
+        }
 
-        #Rewrite to get child by pids and then fork the status check task
-        flag = False
-        while not flag:
-            for pid in pids:
-                child = self.OS.tasks.search(pid)
-                if child == -1:
-                    flag = True 
-                else:
-                    flag &= bool(child.asyncTaskHandle) and child.asyncTaskHandle.done()
-            if not flag:
-                await asyncio.sleep(.01)
-            else:
-                self.sendSignal(parentPid, 5)
-                return 
-    
-        # task = SmallTask(
-        #     self.priority,
-        #     statusCheck,
-        #     name=name
-        # )
+        asyncSpawner = SmallTask(
+            priority,
+            spawnerRoutine,
+            name=name,
+            parent=parentPid,
+            handlers=handleFinishedAsync,
+            args=args
+        )
 
-        # await statusCheck()
+        self.fork(asyncSpawner)
+
         return 
 
 
-    async def kill(self, flags={}):
-        self.asyncTaskHandle.cancel()
+    def kill(self, flags={}):
         if not self.OS: return -1
+
+        if self.isAsync:
+            self.asyncTaskHandle.cancel()
 
         if '-r' in flags:
             for child in self.children:
                 child.kill()
+        
+        if self.parent:
+            self.parent.children.remove(self.getID())
          
-        await self.OS.tasks.delete(self.getID())
+        self.OS.tasks.delete(self.getID())
 
 
     def getExeStatus(self):
@@ -266,7 +321,7 @@ class SmallTask(SmallSignals, Node):
             it is not. 
         '''
         status = (self.isReady == 1) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and (self.isInProgress == 0)
+        status &= (self.isSleep == 0) and (not self.isAsync or self.isInProgress == 0)
         return status 
 
 
@@ -278,7 +333,7 @@ class SmallTask(SmallSignals, Node):
             it can not.       
         '''
         status = (self.isReady == 0) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and self.asyncTaskHandle.done()
+        status &= (self.isSleep == 0) and (not self.isAsync or self.asyncTaskHandle.done())
         return status 
 
 

@@ -3,6 +3,7 @@
 
 
 # from .placeHolder import placeHolder
+from .SmallErrors import AsyncSuspensionError
 
  
 
@@ -18,7 +19,7 @@ class SmallSignals():
         '''
 
         #Need to add adjustable signal length of signal vector.
-        self.signals = [0] * 32  #[0,0,0,0,0,(5)async_wait,0]
+        self.signals = [0] * 32  #[0,0,0,0,0,(5)async_wait,(6)async_child_complete,(7)async_all_children_complete]
         self.isWaiting = 0
         self.isSleep = 0
         self.wakeSigs = list()
@@ -85,13 +86,13 @@ class SmallSignals():
                                         ready=1,
                                         name='handler',
                                         parent=self)
-                self.OS.fork(handlerTask)
+                self.fork(handlerTask)
             if sig in self.wakeSigs:
                 #It may be helpful to move this to a suspended list 
                 # in the OS.
                 self.isWaiting = 0
                 self.isReady = 1
-                self.wakeSigs.remove(sig)
+                self.wakeSigs.remove(sig)             
             return 0
         else:
             return -1
@@ -172,21 +173,25 @@ class SmallSignals():
         @function sigSuspendV2() - Suspends the task until the corresponding 
             signal is recieved. Then the thread is revisited in the next
             getPlace() code block. 
+            **NOTE** 
+                Not for async function.
         @param OS - smallOS - OS object that manages tasks.
         @param state_blob - dict - variables to be saved when the next placeholder
             is executed. Data only
         @return - void
 
         '''
+        if self.isAsync:
+            raise AsyncSuspensionError('Cannot Suspend Async Functions')
         if state_blob != None:
             self.state.update(state_blob)
         #sig is assumed 1
         self.wakeSigs.append(sig)
         self.isWaiting = 1
         self.isReady = 0
-        system_state, _ = self.state.getState(None,'system')
-        system_state['return_status'] = 2
-        self.state.update(system_state,'system')
+        # system_state, _ = self.state.getState(None,'system')
+        # system_state['return_status'] = 2
+        # self.state.update(system_state,'system')
         return
 
 
