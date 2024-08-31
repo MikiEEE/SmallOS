@@ -66,7 +66,7 @@ class SmallTask(SmallSignals, Node):
         #Async
         self.asyncTaskHandle = None
         self.isInProgress = 0 
-        self.isAsync = False
+        self.isAsync = 0
 
 
         #NEEDS to be changed to function with state preserved in the task
@@ -282,7 +282,7 @@ class SmallTask(SmallSignals, Node):
         args = {
             "tasks": newTasks,
         }
-
+        #For some reason extra handler pops up on task list
         asyncSpawner = SmallTask(
             priority,
             spawnerRoutine,
@@ -321,7 +321,7 @@ class SmallTask(SmallSignals, Node):
             it is not. 
         '''
         status = (self.isReady == 1) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and (not self.isAsync or self.isInProgress == 0)
+        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.isInProgress == 0)
         return status 
 
 
@@ -333,7 +333,8 @@ class SmallTask(SmallSignals, Node):
             it can not.       
         '''
         status = (self.isReady == 0) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and (not self.isAsync or self.asyncTaskHandle.done())
+        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.asyncTaskHandle.done())
+        status &= not self.isWatcher
         return status 
 
 
@@ -358,10 +359,12 @@ class SmallTask(SmallSignals, Node):
             name = 'Unamed Process'
         else:
             name = self.name
-        return 'PID={}, name={}, priority={},status={}'.format(self.pid,
+        return 'PID={}, name={}, priority={}, ExeStatus={}, DelStatus={}, isAsync={}'.format(self.pid,
                                                     name,
                                                     self.priority,
-                                                    self.getExeStatus())
+                                                    self.getExeStatus(),
+                                                    self.getDelStatus(),
+                                                    self.isAsync)
 
 
 

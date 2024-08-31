@@ -4,7 +4,6 @@
 
 # from .placeHolder import placeHolder
 from .SmallErrors import AsyncSuspensionError
-
  
 
 class SmallSignals():
@@ -213,7 +212,7 @@ class SmallSignals():
 
         for sig, _ in enumerate(self.signals):
             self.signals[sig] = 0
-            
+
         return status
 
 

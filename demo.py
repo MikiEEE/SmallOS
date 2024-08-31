@@ -3,7 +3,7 @@ from SmallPackage.SmallTask import SmallTask
 from SmallPackage.Kernel import Unix
 from shells import BaseShell
 
-import pdb, select,sys, socket, asyncio,aiohttp
+import pdb, select,sys, socket,asyncio, aiohttp
 
 NETWORK_SIGNAL=3
 
@@ -399,12 +399,12 @@ def create_async_tasks(self):
     async def sleepwait(self):
         self.OS.print('HELLO\n')
         start  = 1
-        while start < 3:
+        while start < 5:
             await asyncio.sleep(1)
             self.OS.print('create task test sleeping '+str(start)+'\n')
             start += 1 
 
-    yield self.waitOnAsync([sleepwait])
+    yield self.waitOnAsync([sleepwait]*2)
     self.OS.print('done\n')
 
 if __name__ == '__main__':
@@ -413,33 +413,31 @@ if __name__ == '__main__':
     priority = 2
 
     base = BaseShell()
-    watcher_IO =  SmallTask(priority-1,async_watcher_IO,isReady=1,name='watcher_IO',isWatcher=True, isAsync=1)
-    # demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
+    watcher_IO =  SmallTask(priority-1,watcher_IO,isReady=1,name='watcher_IO',isWatcher=True, isAsync=0)
+    demo_1 = SmallTask(priority,forkDemo,isReady=1,name='Parent1', handlers=handler)
     # demo_2 = SmallTask(priority,pHDemo, name='Parent2',handlers=handler)
     # demo_3 = SmallTask(priority,sleepDemo, name='Parent3')
     # demo_4 = SmallTask(priority,sleepAndSuspendDemo, name='Parent4')
     # demo_5 = SmallTask(priority,execDemo,name='Parent5')
     # demo_6 = SmallTask(priority+2,loop_demo,name='Parent6')
     # demo_7 = SmallTask(priority+2,networkDemo,name='Parent7')
-    # demo_8 = SmallTask(2,printer,name='printer')
+    demo_8 = SmallTask(2,printer,name='printer', isAsync=1)
     demo_9 = SmallTask(priority+2,create_async_tasks,name='Parent9')
 
     
     #Instantiate and configure the OS.
-    OS = SmallOS(shells=[base]) #Set up shell interface
-    OS.setKernel(Unix())      #Set up interface for syscalls
-    OS.setEternalWatchers(True)  #Set to end when only watcher tasks remain.
+    OS = SmallOS(shells=[base]).setKernel(Unix()).setEternalWatchers(True) #Set up shell interface   #Set up interface for syscalls #Set to end when only watcher tasks remain.
 
     #Tasks to be executed.
     # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [demo_9,watcher_IO]
+    tasks = [ demo_1,demo_8, demo_9,watcher_IO]
 
     handle = None
 
     # fails = list()
     OS.fork(tasks)
 
-    asyncio.run(OS.start())
+    OS.startOS()
     # asyncio.run(asyncioDemo(None))
 
     #Test how aync tasks also work with yeild. Maybe check for async handle and if it exists  then just call generator next?
