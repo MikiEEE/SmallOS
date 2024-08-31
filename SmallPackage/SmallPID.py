@@ -24,7 +24,7 @@ class SmallPID():
     def newPID(self):
         '''
         @function newPID() - Creates a new valid PID. 
-        @return - int - positive integer on succes 
+        @return - int - positive integer on success 
             -1 on failure.
         '''
         if len(self.usedPID) < self.maxPID:

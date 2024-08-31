@@ -22,7 +22,7 @@ class BaseShell():
 		self.OS = OS
 		return
 
-	async def run(self, inpt):
+	def run(self, inpt):
 		inpt_set = set(inpt.split())
 		if 'sw' in inpt_set:
 			# pdb.set_trace()
