@@ -78,7 +78,7 @@ class SmallSignals():
 
         #Custom signal handlers would be very helpful. 
         #Rather than a catch all function for handlers.
-        if sig < len(self.signals) and sig > -1:
+        if sig < len(self.signals) and sig > -1 and not self.signals[sig] == 1:
             self.signals[sig] = 1
             if self.handlers:
                 handlerTask = self.build(self.priority,
@@ -209,8 +209,11 @@ class SmallSignals():
             self.handlers(task.parent)
             status = 0
         else:
-            self.signals = [0] * 5
             status = -1
+
+        for sig, _ in enumerate(self.signals):
+            self.signals[sig] = 0
+            
         return status
 
 
