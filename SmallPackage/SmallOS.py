@@ -53,6 +53,7 @@ class SmallOS(SmallIO):
     def startOS(self):
         asyncio.run(self.start())
 
+
     async def start(self):
         '''
         @function start() - starts the OS
@@ -86,8 +87,6 @@ class SmallOS(SmallIO):
                         return 
                 await asyncio.sleep(0)
                 self.cursor = self.tasks.pop()
-
-
 
             if self.cursor == None: 
                 self.tasks.resetCatSel()
