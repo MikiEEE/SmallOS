@@ -403,9 +403,11 @@ def create_async_tasks(self):
             await asyncio.sleep(1)
             self.OS.print('create task test sleeping '+str(start)+'\n')
             start += 1 
+        return self.getID()
 
     yield self.waitOnAsync([sleepwait]*2)
-    self.OS.print('done\n')
+    state = self.state.getState()[0]
+    self.OS.print('done\nSTATE:{}\n'.format(state))
 
 if __name__ == '__main__':
     #Priority is set to 2 to give higher priority (quick) system tasks
@@ -426,7 +428,9 @@ if __name__ == '__main__':
 
     
     #Instantiate and configure the OS.
-    OS = SmallOS(shells=[base]).setKernel(Unix()).setEternalWatchers(True) #Set up shell interface   #Set up interface for syscalls #Set to end when only watcher tasks remain.
+    OS = SmallOS(shells=[base])\
+        .setKernel(Unix())\
+        .setEternalWatchers(True) #Set up shell interface   #Set up interface for syscalls #Set to end when only watcher tasks remain.
 
     #Tasks to be executed.
     # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
