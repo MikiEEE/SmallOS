@@ -233,7 +233,10 @@ class SmallTask(SmallSignals, Node):
    
         def wrapChildren(routine):
             async def newRoutine(self):
-                await routine(self)
+                data = await routine(self)
+                parentState = self.parent.state.getState()[0]
+                parentState['asyncResults'][self.args['asyncArrayPlace']] = data
+                self.parent.state.update(parentState)
                 parentPid = self.parent.getID()
                 result = self.sendSignal(parentPid,6)
                 if result != 0:
@@ -260,14 +263,22 @@ class SmallTask(SmallSignals, Node):
         def spawnerRoutine(self):
             name = 'ChildOf ' + str(self.getID())
             pids = []
-            for asyncTask in self.args['tasks']:
+            asyncResults = [None] * len(self.args['tasks'])
+            for num, asyncTask in enumerate(self.args['tasks']):
                 task = SmallTask(priority,
                                     wrapChildren(asyncTask),
                                     name=name,
-                                    isAsync=1)
+                                    isAsync=1,
+                                    args={'asyncArrayPlace': num})
                 pids.append(self.fork(task))
-            self.state.update({'pids':pids})
+            self.state.update({
+                            'pids': pids,
+                            'asyncResults': asyncResults
+                            })
             yield self.sigSuspendV2(7)
+            parentState = self.parent.state.getState()[0]
+            parentState['asyncResults'] = self.state.getState()[0]['asyncResults']
+            self.parent.state.update(parentState)   
             self.sendSignal(self.parent.getID(),5)
             return 
         
