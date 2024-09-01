@@ -303,6 +303,10 @@ class SmallTask(SmallSignals, Node):
         if self.isAsync:
             self.asyncTaskHandle.cancel()
 
+        #Parent of negative one indicates a child has been orphaned. 
+        for child in self.children:
+            child.parent = -1 
+            
         if '-r' in flags:
             for child in self.children:
                 child.kill()
