@@ -204,14 +204,16 @@ class SmallSignals():
             added hanlder function
         @return 0 upon success, -1 upon a nonexistent handler.
         '''
-        if self.handlers:
-            self.handlers(task.parent)
-            status = 0
-        else:
-            status = -1
+        status = 0
+        if task.parent != -1:
+            if self.handlers:
+                self.handlers(task.parent)
+                status = 0
+            else:
+                status = -1
 
-        for sig, _ in enumerate(self.signals):
-            self.signals[sig] = 0
+            for sig, _ in enumerate(task.parent.signals):
+                task.parent.signals[sig] = 0
 
         return status
 

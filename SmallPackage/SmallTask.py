@@ -304,14 +304,17 @@ class SmallTask(SmallSignals, Node):
             self.asyncTaskHandle.cancel()
 
         #Parent of negative one indicates a child has been orphaned. 
-        for child in self.children:
-            child.parent = -1 
+        for childID in self.children:
+            child = self.OS.tasks.search(childID)
+
+            if child != -1:
+                child.parent = -1 
             
         if '-r' in flags:
             for child in self.children:
                 child.kill()
         
-        if self.parent:
+        if self.parent and self.parent != -1:
             self.parent.children.remove(self.getID())
          
         self.OS.tasks.delete(self.getID())
