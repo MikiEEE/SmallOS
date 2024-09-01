@@ -6,7 +6,7 @@ File Deprecated as of concurrency branch update.
 '''
 
 
-class taskState():
+class TaskState():
 
     '''
     @class taskState - state management class for keeping track of 
@@ -78,7 +78,7 @@ class taskState():
             NOTE ***Returns a Deep Copy of the state so state must be updated. 
         '''
         if key == None:
-            return copy.deepcopy(self._state[namespace]),0
+            return copy.deepcopy(self._state[namespace]), 0
         if key in self._state[namespace]:
             return copy.deepcopy(self._state[namespace][key]), 0
         else:

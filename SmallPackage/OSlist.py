@@ -202,7 +202,7 @@ class OSList(SmallPID):
 
         if self.numWatchers < 0:
             raise ValueError('There cannot be negative number of watchers.')
-
+        
         del self.tasks[index]
 
         self.freePID(pid)
