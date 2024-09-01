@@ -404,8 +404,15 @@ def create_async_tasks(self):
             self.OS.print('create task test sleeping '+str(start)+'\n')
             start += 1 
         return self.getID()
+    
+    async def func(self):
+        url = 'http://www.google.com'
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                text = await response.text()
+                return text
 
-    yield self.waitOnAsync([sleepwait]*2)
+    yield self.waitOnAsync([sleepwait, func])
     state = self.state.getState()[0]
     self.OS.print('done\nSTATE:{}\n'.format(state))
 
