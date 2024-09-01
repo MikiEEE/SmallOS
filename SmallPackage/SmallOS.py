@@ -2,6 +2,7 @@ import sys
 import traceback
 import select
 import time
+import asyncio
 
 from .SmallIO import SmallIO
 from .OSlist import OSList
@@ -41,12 +42,19 @@ class SmallOS(SmallIO):
             if kwargs.get('shells',False):
                 shells = kwargs['shells']
                 if isinstance(shells, list):
+                    #Should throw error is setOS doesnt exist.
+                    [shell.setOS(self) for shell in shells]
                     self.shells.extend(shells) 
                 else:
+                    shells.setOS(self)
                     self.shells.append(shells) 
 
 
-    def start(self):
+    def startOS(self):
+        asyncio.run(self.start())
+
+
+    async def start(self):
         '''
         @function start() - starts the OS
         @return void
@@ -70,15 +78,15 @@ class SmallOS(SmallIO):
                 if self.cursor.getExeStatus():
                     result = self.cursor.excecute()
                 
-                if update == -1 and result == 0 and self.cursor.getDelStatus():
+                # return_status, _ = self.cursor.state.getState('return_status','system')
+                
+                if update == -1 and (result == 0 or self.cursor.isAsync == 1) and self.cursor.getDelStatus():
                     self.cursor.kill()
 
                     if not self.eternalWatchers and self.tasks.isOnlyWatchers():
                         return 
-            
+                await asyncio.sleep(0)
                 self.cursor = self.tasks.pop()
-
-
 
             if self.cursor == None: 
                 self.tasks.resetCatSel()
@@ -103,11 +111,15 @@ class SmallOS(SmallIO):
                 pid = self.tasks.insert(item)
                 if pid != - 1: 
                     item.setOS(self)
+                else:
+                    raise MaxProcessError('All available PIDS are in use, cannot add more tasks.')
                 ids.append(pid)
         else:
             ids = self.tasks.insert(children)
             if ids != -1:
                 children.setOS(self)
+            else:
+                raise MaxProcessError('All available PIDS are in use, cannot add more tasks.')
         return ids
 
 
@@ -117,7 +129,7 @@ class SmallOS(SmallIO):
             of other resources.
         '''
         self.kernel = kernel
-        return 
+        return self
 
 
     def setEternalWatchers(self,isEternalWatcherPresent):
@@ -126,7 +138,7 @@ class SmallOS(SmallIO):
             in the OS. 
         '''
         self.eternalWatchers = isEternalWatcherPresent
-        return 
+        return self
 
 
     def __str__(self):
@@ -135,7 +147,7 @@ class SmallOS(SmallIO):
             of all the Tasks in the task list. 
         '''
         AllTasks = list(self.tasks.tasks)
-        string = str()
+        string = 'SmallOS\n'
         for count,routine in enumerate(AllTasks):
             string += str(count+1)+ '. ' + str(routine) + '\n'
         return string

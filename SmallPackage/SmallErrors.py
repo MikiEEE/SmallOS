@@ -19,3 +19,8 @@ class StateDictionaryKeyError(Exception):
 	Updating Actions. 
 	'''
 	pass
+
+class AsyncSuspensionError(Exception):
+	'''
+	Raised When Someone Tries To Suspend an Async Function.
+	'''

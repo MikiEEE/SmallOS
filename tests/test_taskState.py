@@ -2,12 +2,12 @@ import sys, unittest
 
 sys.path.append('..')
 
-from SmallPackage.taskState import taskState
+from SmallPackage.TaskState import TaskState
 
 class test_taskState(unittest.TestCase):
 
 	def test_update_and_retieval(self):
-		state = taskState()
+		state = TaskState()
 		data = {'mice':10,'men':'blob','blob':{'10':20}}
 
 		blank_state, status = state.getState(None,'data')
@@ -25,7 +25,7 @@ class test_taskState(unittest.TestCase):
 
 
 	def test_Free(self):
-		state = taskState()
+		state = TaskState()
 		data = {'mice':10}
 
 		isFree = state.isFree('mice','data')

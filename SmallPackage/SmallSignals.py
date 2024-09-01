@@ -3,7 +3,7 @@
 
 
 # from .placeHolder import placeHolder
-
+from .SmallErrors import AsyncSuspensionError
  
 
 class SmallSignals():
@@ -18,7 +18,7 @@ class SmallSignals():
         '''
 
         #Need to add adjustable signal length of signal vector.
-        self.signals = [0] * 32
+        self.signals = [0] * 32  #[0,0,0,0,0,(5)async_wait,(6)async_child_complete,(7)async_all_children_complete]
         self.isWaiting = 0
         self.isSleep = 0
         self.wakeSigs = list()
@@ -77,7 +77,7 @@ class SmallSignals():
 
         #Custom signal handlers would be very helpful. 
         #Rather than a catch all function for handlers.
-        if sig < len(self.signals) and sig > -1:
+        if sig < len(self.signals) and sig > -1 and not self.signals[sig] == 1:
             self.signals[sig] = 1
             if self.handlers:
                 handlerTask = self.build(self.priority,
@@ -85,13 +85,13 @@ class SmallSignals():
                                         ready=1,
                                         name='handler',
                                         parent=self)
-                self.OS.fork(handlerTask)
+                self.fork(handlerTask)
             if sig in self.wakeSigs:
                 #It may be helpful to move this to a suspended list 
                 # in the OS.
                 self.isWaiting = 0
                 self.isReady = 1
-                self.wakeSigs.remove(sig)
+                self.wakeSigs.remove(sig)             
             return 0
         else:
             return -1
@@ -172,20 +172,25 @@ class SmallSignals():
         @function sigSuspendV2() - Suspends the task until the corresponding 
             signal is recieved. Then the thread is revisited in the next
             getPlace() code block. 
+            **NOTE** 
+                Not for async function.
         @param OS - smallOS - OS object that manages tasks.
         @param state_blob - dict - variables to be saved when the next placeholder
-            is executed. 
+            is executed. Data only
         @return - void
 
         '''
+        if self.isAsync:
+            raise AsyncSuspensionError('Cannot Suspend Async Functions')
         if state_blob != None:
             self.state.update(state_blob)
         #sig is assumed 1
         self.wakeSigs.append(sig)
         self.isWaiting = 1
         self.isReady = 0
-        return_val = {'return_status':2}
-        self.state.update(return_val,'system')
+        # system_state, _ = self.state.getState(None,'system')
+        # system_state['return_status'] = 2
+        # self.state.update(system_state,'system')
         return
 
 
@@ -199,12 +204,17 @@ class SmallSignals():
             added hanlder function
         @return 0 upon success, -1 upon a nonexistent handler.
         '''
-        if self.handlers:
-            self.handlers(task.parent)
-            status = 0
-        else:
-            self.signals = [0] * 5
-            status = -1
+        status = 0
+        if task.parent != -1:
+            if self.handlers:
+                self.handlers(task.parent)
+                status = 0
+            else:
+                status = -1
+
+            for sig, _ in enumerate(task.parent.signals):
+                task.parent.signals[sig] = 0
+
         return status
 
 

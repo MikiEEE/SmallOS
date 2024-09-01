@@ -1,4 +1,4 @@
-import time
+import time, asyncio
 import traceback
 
 from .async_util.iterator_util import is_iterator
@@ -6,7 +6,7 @@ from .async_util.iterator_util import is_iterator
 from .SmallErrors import PIDError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
-from .taskState import taskState
+from .TaskState import TaskState
 
 
 
@@ -39,25 +39,38 @@ class SmallTask(SmallSignals, Node):
                 perform actions during the event of a signal being
                 recieved.
             @arg parent - task() - parent task that spawned this current task
+            @arg args - tuple(obj) - list of arguments to be passed in when routine is called.
         '''
+
         self.pid =  -1
         self.priority = priority
-        self.routine = self.wrap(routine)
         self.isReady = 1
         self.isLocked = 0
         self.isWatcher = False
         self.parent = None
         self.OS = None
         self.placeholder  = 0
-        self.state = taskState()
+        self.state = TaskState()
         self.children = list()
 
-        #NEEDS to be changed to function with state preserved in the task
-        self.updateFunc = None
+        #Set the return value to the OS.
+        return_val = {'return_status':0}
+        self.state.update(return_val,'system')
+
+        self.routine = self.wrap(routine)
+
 
         SmallSignals.__init__(self,self.OS,kwargs)
         Node.__init__(self)
-        taskState.__init__(self)
+
+        #Async
+        self.asyncTaskHandle = None
+        self.isInProgress = 0 
+        self.isAsync = 0
+
+
+        #NEEDS to be changed to function with state preserved in the task
+        self.updateFunc = None
 
         if kwargs:
             if kwargs.get('name',False):
@@ -70,32 +83,48 @@ class SmallTask(SmallSignals, Node):
                 self.isReady = kwargs['isReady']
             if kwargs.get('isWatcher',False):
                 self.isWatcher = kwargs['isWatcher']
+            if kwargs.get('isAsync', False):
+                self.isAsync = kwargs['isAsync']
+            if kwargs.get('args', False):
+                self.args = kwargs['args']
 
         return
 
 
     def wrap(self, func):
         def wrapper(self):
-            #Set the return value to the OS.
-            return_val = {'return_status':0}
-            self.state.update(return_val,'system')
 
-            data = self.state.getState('has_run','system')
-
-            if is_iterator(func(self)):
+            data = self.state.getState(None,'system')
+            if self.isAsync: 
+                async def newRoutine(self):
+                    try:
+                        await func(self)
+                    except asyncio.CancelledError as e:
+                        self.isInProgress = 0
+                    except Exception as e:
+                        raise e
+                    finally:
+                        self.isInProgress = 0
+                        
+                if data[0].get('has_run',-1) == -1:
+                    blob = data[0]
+                    blob['has_run'] = 1
+                    self.state.update(blob,'system')
+                    self.isInProgress = 1
+                    self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
+            elif is_iterator(func(self)):
                 try:
-                    if data[1] == -1:
+                    if data[0].get('has_run',-1) == -1:
                         blob = {'has_run':1}
                         self.state.update(blob,'system')
                         self.f = func(self)
                         next(self.f)
-
                     else:
                         self.f.send(None)
 
                 except StopIteration as e:
                     self.f.close()
-            else: 
+            else:
                 func(self)
             return self.state.getState('return_status','system')[0]
         return wrapper
@@ -184,20 +213,120 @@ class SmallTask(SmallSignals, Node):
 
 
     def fork(self,new_task):
+        '''
+        @function fork - taks in smallTasks and feeds them to to smallOS 
+            labels the tasks as children.
+        '''
 
         new_task.parent = self
         pid = self.OS.fork(new_task)
         self.children.append(pid)
         return pid
+    
+    ##Change this into a function that is a generator that 
+    # spanws a process that spawns off the children and then wrap the children so that when they are 
+    # done they trigger a signal handler in the generator process that records it as done and then
+    # checks status of all other children. When they are done, feed the data to this process 
+    # so that the original task in the demo can call next() on the waitOnasync function and get an array
+    # of results. 
+    def waitOnAsync(self, newTasks, priority=None):
+   
+        def wrapChildren(routine):
+            async def newRoutine(self):
+                data = await routine(self)
+                parentState = self.parent.state.getState()[0]
+                parentState['asyncResults'][self.args['asyncArrayPlace']] = data
+                self.parent.state.update(parentState)
+                parentPid = self.parent.getID()
+                result = self.sendSignal(parentPid,6)
+                if result != 0:
+                    data = self.state.getState(None,'system')[0]
+                    data['return_status'] = -1
+                    self.state.update(data,'system')
+                return
+            return newRoutine
+        
+        def handleFinishedAsync(self):
+            if self.checkSignal(6):
+                flag = True
+                pids = self.state.getState('pids')[0]
+                for pid in pids:
+                    child = self.OS.tasks.search(pid)
+                    if child == -1:
+                        flag &= True 
+                    else:
+                        flag &= bool(child.asyncTaskHandle) and child.asyncTaskHandle.done()
+                if flag:
+                    self.sendSignal(self.getID(), 7)
+            return
+
+        def spawnerRoutine(self):
+            name = 'ChildOf ' + str(self.getID())
+            pids = []
+            asyncResults = [None] * len(self.args['tasks'])
+            for num, asyncTask in enumerate(self.args['tasks']):
+                task = SmallTask(priority,
+                                    wrapChildren(asyncTask),
+                                    name=name,
+                                    isAsync=1,
+                                    args={'asyncArrayPlace': num})
+                pids.append(self.fork(task))
+            self.state.update({
+                            'pids': pids,
+                            'asyncResults': asyncResults
+                            })
+            yield self.sigSuspendV2(7)
+            parentState = self.parent.state.getState()[0]
+            parentState['asyncResults'] = self.state.getState()[0]['asyncResults']
+            self.parent.state.update(parentState)   
+            self.sendSignal(self.parent.getID(),5)
+            return 
+        
+        if not priority:
+            priority = self.priority
+
+        parentPid = self.getID()
+        name = 'ChildOf ' + str(self.getID())
+
+        self.sigSuspendV2(5)
+
+        args = {
+            "tasks": newTasks,
+        }
+        #For some reason extra handler pops up on task list
+        asyncSpawner = SmallTask(
+            priority,
+            spawnerRoutine,
+            name=name,
+            parent=parentPid,
+            handlers=handleFinishedAsync,
+            args=args
+        )
+
+        self.fork(asyncSpawner)
+
+        return 
 
 
     def kill(self, flags={}):
-
         if not self.OS: return -1
 
+        if self.isAsync:
+            self.asyncTaskHandle.cancel()
+
+        #Parent of negative one indicates a child has been orphaned. 
+        for childID in self.children:
+            child = self.OS.tasks.search(childID)
+
+            if child != -1:
+                child.parent = -1 
+            
         if '-r' in flags:
             for child in self.children:
                 child.kill()
+        
+        if self.parent and self.parent != -1:
+            self.parent.children.remove(self.getID())
          
         self.OS.tasks.delete(self.getID())
 
@@ -210,7 +339,7 @@ class SmallTask(SmallSignals, Node):
             it is not. 
         '''
         status = (self.isReady == 1) and (self.isWaiting == 0)
-        status = status and (self.isSleep == 0)
+        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.isInProgress == 0)
         return status 
 
 
@@ -222,7 +351,8 @@ class SmallTask(SmallSignals, Node):
             it can not.       
         '''
         status = (self.isReady == 0) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0)
+        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.asyncTaskHandle.done())
+        status &= not self.isWatcher
         return status 
 
 
@@ -247,10 +377,12 @@ class SmallTask(SmallSignals, Node):
             name = 'Unamed Process'
         else:
             name = self.name
-        return 'PID={}, name={}, priority={},status={}'.format(self.pid,
+        return 'PID={}, name={}, priority={}, ExeStatus={}, DelStatus={}, isAsync={}'.format(self.pid,
                                                     name,
                                                     self.priority,
-                                                    self.getExeStatus())
+                                                    self.getExeStatus(),
+                                                    self.getDelStatus(),
+                                                    self.isAsync)
 
 
 

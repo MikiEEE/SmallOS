@@ -19,9 +19,7 @@ class Kernel():
 
 	def time_epoch(self):
 		pass
-
-
-
+	
 
 
 
@@ -30,6 +28,7 @@ class Unix(Kernel):
 	'''
 	For Unix like Systems. 
 	'''
+
 	def __init__(self):
 		pass
 
@@ -41,8 +40,14 @@ class Unix(Kernel):
 	def time_epoch(self):
 		return time.time()
 
+	def socket_send(self, data):
+		return 
 
-
+	def socket_recv(self, buffer_size):
+		return 
+	
+	def socket_bind(self,ip:str,port:int):
+		return
 
 
 
