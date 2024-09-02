@@ -1,4 +1,3 @@
-import time, asyncio
 import traceback
 
 from .async_util.iterator_util import is_iterator
@@ -125,7 +124,10 @@ class SmallTask(SmallSignals, Node):
                 except StopIteration as e:
                     self.f.close()
             else:
-                func(self)
+                if data[0].get('has_run',-1) == -1:
+                    func(self)
+                    blob = {'has_run':1}
+                    self.state.update(blob,'system')
             return self.state.getState('return_status','system')[0]
         return wrapper
             
