@@ -129,6 +129,7 @@ class SmallTask(SmallSignals, Node):
                     func(self)
                     blob = data[0]
                     blob['has_run'] = 1
+                    blob['return_status'] = 0
                     self.state.update(blob,'system')
             return self.state.getState('return_status','system')[0]
         return wrapper
