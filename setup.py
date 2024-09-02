@@ -2,8 +2,9 @@ from setuptools import setup, find_packages
 
 setup(
     name="SmallPackage",  
-    version="1.0.2",  # Version of your package
+   use_scm_version=True,  # Version of your package
     packages=find_packages(),  # Automatically find packages in the directory
+    setup_requires=["setuptools-scm"]
     install_requires=[  # SmallOS should only use standard library
     ],
     author="Michael E",
