@@ -1,12 +1,11 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="SmallPackage",  
-   use_scm_version=True,  # Version of your package
+    name="SmallPackage",
+    use_scm_version=True,  # Automatically use the version from Git
+    setup_requires=["setuptools-scm"],  # Ensure setuptools_scm is available during setup
     packages=find_packages(),  # Automatically find packages in the directory
-    setup_requires=["setuptools-scm"]
-    install_requires=[  # SmallOS should only use standard library
-    ],
+    install_requires=[],  # SmallOS should only use the standard library
     author="Michael E",
     author_email="mikemp1997@gmail.com",
     description="Concurrent and Priority oriented Task Management System",
