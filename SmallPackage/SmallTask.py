@@ -114,7 +114,8 @@ class SmallTask(SmallSignals, Node):
             elif is_iterator(func(self)):
                 try:
                     if data[0].get('has_run',-1) == -1:
-                        blob = {'has_run':1}
+                        blob = data[0]
+                        blob['has_run'] = 1
                         self.state.update(blob,'system')
                         self.f = func(self)
                         next(self.f)
@@ -126,7 +127,8 @@ class SmallTask(SmallSignals, Node):
             else:
                 if data[0].get('has_run',-1) == -1:
                     func(self)
-                    blob = {'has_run':1}
+                    blob = data[0]
+                    blob['has_run'] = 1
                     self.state.update(blob,'system')
             return self.state.getState('return_status','system')[0]
         return wrapper
