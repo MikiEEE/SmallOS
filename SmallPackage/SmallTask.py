@@ -126,7 +126,6 @@ class SmallTask(SmallSignals, Node):
                     self.f.close()
             else:
                 if data[0].get('has_run',-1) == -1:
-                    func(self)
                     blob = data[0]
                     blob['has_run'] = 1
                     blob['return_status'] = 0
