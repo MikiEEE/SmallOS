@@ -1,4 +1,4 @@
-import traceback
+import traceback, asyncio
 
 from .async_util.iterator_util import is_iterator
 
@@ -51,6 +51,7 @@ class SmallTask(SmallSignals, Node):
         self.placeholder  = 0
         self.state = TaskState()
         self.children = list()
+        self.f = None
 
         #Set the return value to the OS.
         return_val = {'return_status':0}
@@ -111,25 +112,28 @@ class SmallTask(SmallSignals, Node):
                     self.state.update(blob,'system')
                     self.isInProgress = 1
                     self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
-            elif is_iterator(func(self)):
-                try:
+            else:
+                if not self.f:
+                    self.f = func(self)
+
+                if is_iterator(self.f):
+                    try:
+                        if data[0].get('has_run',-1) == -1:
+                            blob = data[0]
+                            blob['has_run'] = 1
+                            self.state.update(blob,'system')
+                            next(self.f)
+                        else:
+                            self.f.send(None)
+
+                    except StopIteration as e:
+                        self.f.close()
+                else:
                     if data[0].get('has_run',-1) == -1:
                         blob = data[0]
                         blob['has_run'] = 1
+                        blob['return_status'] = 0
                         self.state.update(blob,'system')
-                        self.f = func(self)
-                        next(self.f)
-                    else:
-                        self.f.send(None)
-
-                except StopIteration as e:
-                    self.f.close()
-            else:
-                if data[0].get('has_run',-1) == -1:
-                    blob = data[0]
-                    blob['has_run'] = 1
-                    blob['return_status'] = 0
-                    self.state.update(blob,'system')
             return self.state.getState('return_status','system')[0]
         return wrapper
             
