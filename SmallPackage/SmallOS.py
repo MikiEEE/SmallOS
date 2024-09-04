@@ -1,7 +1,3 @@
-import sys
-import traceback
-import select
-import time
 import asyncio
 
 from .SmallIO import SmallIO

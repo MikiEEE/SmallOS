@@ -118,14 +118,14 @@ class SmallTask(SmallSignals, Node):
 
                 if is_iterator(self.f):
                     try:
+                        sendable = None
                         if data[0].get('has_run',-1) == -1:
                             blob = data[0]
                             blob['has_run'] = 1
                             self.state.update(blob,'system')
-                            next(self.f)
                         else:
-                            self.f.send(None)
-
+                            sendable = self.state.getState('asyncResults')[0]
+                        self.f.send(sendable)   
                     except StopIteration as e:
                         self.f.close()
                 else:
