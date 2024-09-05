@@ -115,8 +115,9 @@ class SmallSignals():
 
         if state_blob != None:
             self.state.update(state_blob)
-        return_val = {'return_status':1}
-        self.state.update(return_val,'system')
+        state = self.state.getState(None, 'system')[0]
+        state['return_status'] = 1
+        self.state.update(state,'system')
         self.isSleep = 1
         self.OS.tasks.moveToSleepList(self)
 
@@ -137,6 +138,10 @@ class SmallSignals():
         self.isSleep = 0
         #Added, woken tasks will be exceuted first if their priority is greater.
         self.OS.tasks.notifyWake(self)
+
+        state = self.state.getState(None, 'system')[0]
+        state['return_status'] = 0
+        self.state.update(state,'system')
         return
 
 

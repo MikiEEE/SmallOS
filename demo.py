@@ -378,24 +378,8 @@ async def asyncioDemo(self):
     except Exception as e:
         print(e)
 
-async def async_watcher_IO(self):
-    loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader()
-    reader_protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
-
-    while True:
-        inpt = await reader.readline()
-        if inpt:
-            inpt = inpt.decode('utf-8')
-            for shell in self.OS.shells:
-                await shell.run(inpt)
-            # print('INPUT', inpt)
-        await asyncio.sleep(0.01)
 
 def create_async_tasks(self):
-    one = 1
-    self.OS.print('IIII\n')
     async def sleepwait(self):
         self.OS.print('HELLO\n')
         start  = 1
@@ -412,9 +396,17 @@ def create_async_tasks(self):
                 text = await response.text()
                 return text
 
-    yield self.waitOnAsync([sleepwait, func])
-    state = self.state.getState()[0]
-    self.OS.print('done\nSTATE:{}\n'.format(state))
+    results = yield self.waitOnAsync([sleepwait, func])
+    self.OS.print('done\nSTATE:{}\n'.format(results))
+
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     #Priority is set to 2 to give higher priority (quick) system tasks
@@ -433,23 +425,17 @@ if __name__ == '__main__':
     demo_8 = SmallTask(2,printer,name='printer', isAsync=1)
     demo_9 = SmallTask(priority+2,create_async_tasks,name='Parent9')
 
-    
+    #Tasks to be executed.
+    # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
+    tasks = [ demo_1,demo_8, demo_9,watcher_IO]
+
     #Instantiate and configure the OS.
     OS = SmallOS(shells=[base])\
         .setKernel(Unix())\
         .setEternalWatchers(True) #Set up shell interface   #Set up interface for syscalls #Set to end when only watcher tasks remain.
 
-    #Tasks to be executed.
-    # tasks = [demo_1,demo_2,demo_3,demo_4,demo_5,demo_6,watcher_IO]
-    tasks = [ demo_1,demo_8, demo_9,watcher_IO]
-
-    handle = None
-
-    # fails = list()
     OS.fork(tasks)
-
     OS.startOS()
-    # asyncio.run(asyncioDemo(None))
 
     #Test how aync tasks also work with yeild. Maybe check for async handle and if it exists  then just call generator next?
     #move baseShell into OS by default , output piping, make shell more robust, Describe each demo,
