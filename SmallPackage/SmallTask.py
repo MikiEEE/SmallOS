@@ -124,7 +124,7 @@ class SmallTask(SmallSignals, Node):
                             blob['has_run'] = 1
                             self.state.update(blob,'system')
                         else:
-                            sendable = self.state.getState('asyncResults')[0]
+                            sendable = self.state.getState('asyncResults','system')[0]
                         self.f.send(sendable)   
                     except StopIteration as e:
                         self.f.close()
@@ -242,9 +242,9 @@ class SmallTask(SmallSignals, Node):
         def wrapChildren(routine):
             async def newRoutine(self):
                 data = await routine(self)
-                parentState = self.parent.state.getState()[0]
+                parentState = self.parent.state.getState(None,'system')[0]
                 parentState['asyncResults'][self.args['asyncArrayPlace']] = data
-                self.parent.state.update(parentState)
+                self.parent.state.update(parentState, 'system')
                 parentPid = self.parent.getID()
                 result = self.sendSignal(parentPid,6)
                 if result != 0:
@@ -257,7 +257,7 @@ class SmallTask(SmallSignals, Node):
         def handleFinishedAsync(self):
             if self.checkSignal(6):
                 flag = True
-                pids = self.state.getState('pids')[0]
+                pids = self.state.getState('pids','system')[0]
                 for pid in pids:
                     child = self.OS.tasks.search(pid)
                     if child == -1:
@@ -282,11 +282,13 @@ class SmallTask(SmallSignals, Node):
             self.state.update({
                             'pids': pids,
                             'asyncResults': asyncResults
-                            })
+                            }, 
+                            'system'
+                            )
             yield self.sigSuspendV2(7)
-            parentState = self.parent.state.getState()[0]
-            parentState['asyncResults'] = self.state.getState()[0]['asyncResults']
-            self.parent.state.update(parentState)   
+            parentState = self.parent.state.getState(None,'system')[0]
+            parentState['asyncResults'] = self.state.getState(None,'system')[0]['asyncResults']
+            self.parent.state.update(parentState,'system')   
             self.sendSignal(self.parent.getID(),5)
             return 
         

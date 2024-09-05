@@ -380,8 +380,6 @@ async def asyncioDemo(self):
 
 
 def create_async_tasks(self):
-    one = 1
-    self.OS.print('IIII\n')
     async def sleepwait(self):
         self.OS.print('HELLO\n')
         start  = 1
@@ -400,6 +398,15 @@ def create_async_tasks(self):
 
     results = yield self.waitOnAsync([sleepwait, func])
     self.OS.print('done\nSTATE:{}\n'.format(results))
+
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     #Priority is set to 2 to give higher priority (quick) system tasks
