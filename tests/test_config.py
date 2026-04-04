@@ -34,6 +34,10 @@ class TestSmallOSConfig(unittest.TestCase):
                     "priority_levels": 9,
                     "io_buffer_length": 32,
                     "eternal_watchers": False,
+                    "client_defaults": {
+                        "stream": {"max_buffer_size": 4096},
+                        "mqtt": {"keepalive": 45},
+                    },
                 },
                 handle,
             )
@@ -48,6 +52,8 @@ class TestSmallOSConfig(unittest.TestCase):
         self.assertEqual(9, config.priority_levels)
         self.assertEqual(32, config.io_buffer_length)
         self.assertFalse(config.eternal_watchers)
+        self.assertEqual(4096, config.client_defaults["stream"]["max_buffer_size"])
+        self.assertEqual(45, config.client_defaults["mqtt"]["keepalive"])
 
     def test_smallos_uses_config_for_runtime_sizing(self):
         config = SmallOSConfig(
@@ -63,6 +69,41 @@ class TestSmallOSConfig(unittest.TestCase):
         self.assertEqual(6, runtime.tasks.num_priorities)
         self.assertEqual(20, runtime.buffer_length)
         self.assertTrue(runtime.eternalWatchers)
+
+    def test_client_defaults_merge_stream_and_protocol_sections(self):
+        config = SmallOSConfig.from_dict(
+            {
+                "client_defaults": {
+                    "stream": {"max_buffer_size": 2048},
+                    "http": {"max_response_size": 512},
+                    "mqtt": {"keepalive": 15},
+                }
+            }
+        )
+
+        http_defaults = config.client_defaults_for("http")
+        mqtt_defaults = config.client_defaults_for("mqtt")
+
+        self.assertEqual(2048, http_defaults["max_buffer_size"])
+        self.assertEqual(512, http_defaults["max_response_size"])
+        self.assertEqual(2048, mqtt_defaults["max_buffer_size"])
+        self.assertEqual(15, mqtt_defaults["keepalive"])
+
+    def test_copy_preserves_nested_client_defaults(self):
+        config = SmallOSConfig.from_dict(
+            {
+                "client_defaults": {
+                    "stream": {"max_buffer_size": 8192},
+                    "redis": {"max_nesting_depth": 12},
+                }
+            }
+        )
+
+        cloned = config.copy(priority_levels=8)
+
+        self.assertEqual(8, cloned.priority_levels)
+        self.assertEqual(8192, cloned.client_defaults["stream"]["max_buffer_size"])
+        self.assertEqual(12, cloned.client_defaults["redis"]["max_nesting_depth"])
 
 
 if __name__ == "__main__":

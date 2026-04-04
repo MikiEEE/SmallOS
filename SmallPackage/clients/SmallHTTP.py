@@ -16,11 +16,25 @@ the implementation easy to reason about and works well for the common
 
 import json
 
+from ._client_config import MISSING, resolve_client_setting
 from .SmallStream import SmallStream, StreamClosedError
 
 
 class HTTPProtocolError(Exception):
     """Raised when the peer sends malformed or unsupported HTTP data."""
+
+
+def _sanitize_header_value(value):
+    """Strip characters that could enable header injection."""
+    return str(value).replace("\r", "").replace("\n", "").replace("\x00", "")
+
+
+def _sanitize_header_name(name):
+    """Strip characters that could enable header injection."""
+    cleaned = str(name).replace("\r", "").replace("\n", "").replace("\x00", "").replace(":", "")
+    if not cleaned:
+        raise ValueError("HTTP header name must not be empty.")
+    return cleaned
 
 
 def _percent_encode(value):
@@ -189,6 +203,8 @@ class SmallHTTPClient:
         tls_cert_file=None,
         tls_key_file=None,
         tls_verify=True,
+        max_response_size=MISSING,
+        max_buffer_size=MISSING,
     ):
         self.task = task
         self.default_headers = dict(default_headers or {})
@@ -196,6 +212,20 @@ class SmallHTTPClient:
         self.tls_cert_file = tls_cert_file
         self.tls_key_file = tls_key_file
         self.tls_verify = tls_verify
+        self.max_response_size = resolve_client_setting(
+            task,
+            "http",
+            "max_response_size",
+            max_response_size,
+            16 * 1024 * 1024,
+        )
+        self.max_buffer_size = resolve_client_setting(
+            task,
+            "http",
+            "max_buffer_size",
+            max_buffer_size,
+            16 * 1024 * 1024,
+        )
         self.base_path = ""
 
         if base_url is not None:
@@ -225,6 +255,7 @@ class SmallHTTPClient:
             tls_cert_file=self.tls_cert_file,
             tls_key_file=self.tls_key_file,
             tls_verify=self.tls_verify,
+            max_buffer_size=self.max_buffer_size,
         )
 
     def _default_port(self):
@@ -330,7 +361,10 @@ class SmallHTTPClient:
 
         lines = ["{} {} HTTP/1.1".format(method.upper(), target)]
         for name, value in request_headers:
-            lines.append("{}: {}".format(name, value))
+            lines.append("{}: {}".format(
+                _sanitize_header_name(name),
+                _sanitize_header_value(value),
+            ))
         request_bytes = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8") + body
 
         stream = self._make_stream()
@@ -387,7 +421,16 @@ class SmallHTTPClient:
         elif "chunked" in header_map.get("transfer-encoding", "").lower():
             body = await self._read_chunked_body(stream)
         elif "content-length" in header_map:
-            body = await stream.read_exactly(int(header_map["content-length"]))
+            content_length = int(header_map["content-length"])
+            if content_length < 0:
+                raise HTTPProtocolError("Negative Content-Length.")
+            if self.max_response_size and content_length > self.max_response_size:
+                raise HTTPProtocolError(
+                    "Content-Length {} exceeds max_response_size ({}).".format(
+                        content_length, self.max_response_size
+                    )
+                )
+            body = await stream.read_exactly(content_length)
         else:
             body = await self._read_to_close(stream)
 
@@ -402,6 +445,7 @@ class SmallHTTPClient:
     async def _read_chunked_body(self, stream):
         """Read an HTTP chunked-transfer body."""
         chunks = []
+        total = 0
         while True:
             line = (await stream.read_until(b"\r\n"))[:-2]
             size_text = line.split(b";", 1)[0]
@@ -411,7 +455,14 @@ class SmallHTTPClient:
                     trailer = await stream.read_until(b"\r\n")
                     if trailer == b"\r\n":
                         return b"".join(chunks)
+            if self.max_response_size and total + chunk_size > self.max_response_size:
+                raise HTTPProtocolError(
+                    "Chunked body exceeds max_response_size ({}).".format(
+                        self.max_response_size
+                    )
+                )
             chunks.append(await stream.read_exactly(chunk_size))
+            total += chunk_size
             trailer = await stream.read_exactly(2)
             if trailer != b"\r\n":
                 raise HTTPProtocolError("Malformed chunk terminator.")
@@ -419,8 +470,17 @@ class SmallHTTPClient:
     async def _read_to_close(self, stream):
         """Read until the peer closes the HTTP stream."""
         chunks = []
+        total = 0
         while True:
             try:
-                chunks.append(await stream.recv_some())
+                chunk = await stream.recv_some()
+                total += len(chunk)
+                if self.max_response_size and total > self.max_response_size:
+                    raise HTTPProtocolError(
+                        "Response body exceeds max_response_size ({}).".format(
+                            self.max_response_size
+                        )
+                    )
+                chunks.append(chunk)
             except StreamClosedError:
                 return b"".join(chunks)

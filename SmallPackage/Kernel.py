@@ -433,7 +433,7 @@ class Unix(Kernel):
 		if tls_verify:
 			context = self._ssl.create_default_context(cafile=tls_ca_file)
 		else:
-			context = self._ssl._create_unverified_context()
+			context = self._ssl.SSLContext(self._ssl.PROTOCOL_TLS_CLIENT)
 			context.check_hostname = False
 			context.verify_mode = self._ssl.CERT_NONE
 		if tls_cert_file is not None:
@@ -583,6 +583,7 @@ class MicroPythonKernel(Kernel):
 			return True
 		except Exception as exc:
 			err = self._extract_errno(exc)
+			# 115 = EINPROGRESS, 11 = EAGAIN on most MicroPython targets
 			pending = {
 				115, 11,
 			}
@@ -617,7 +618,6 @@ class MicroPythonKernel(Kernel):
 		if not self._ssl:
 			raise NotImplementedError('TLS support is not available on this MicroPython port.')
 
-		attempts = []
 		kwargs = {}
 		if server_hostname is not None:
 			kwargs['server_hostname'] = server_hostname
@@ -627,11 +627,23 @@ class MicroPythonKernel(Kernel):
 			kwargs['key'] = tls_key_file
 		if not tls_verify and hasattr(self._ssl, 'CERT_NONE'):
 			kwargs['cert_reqs'] = self._ssl.CERT_NONE
+
+		# Build a list of progressively simpler kwarg sets to handle ports
+		# whose ssl.wrap_socket rejects unknown keyword arguments.  When
+		# tls_verify is True we never fall back to a bare call — doing so
+		# would silently disable certificate verification.
+		attempts = []
 		if kwargs:
 			attempts.append(kwargs)
 		if 'cert' in kwargs or 'key' in kwargs or 'cert_reqs' in kwargs:
 			attempts.append({k: v for k, v in kwargs.items() if k == 'server_hostname'})
-		attempts.append({})
+		if not tls_verify:
+			# Only allow the bare fallback when verification is explicitly
+			# disabled — falling back here with tls_verify=True would be a
+			# silent security downgrade.
+			attempts.append({})
+		if not attempts:
+			attempts.append({})
 
 		last_error = None
 		for wrap_kwargs in attempts:

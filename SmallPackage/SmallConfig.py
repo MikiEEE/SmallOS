@@ -8,6 +8,25 @@ points.
 """
 
 
+_DEFAULT_CLIENT_DEFAULTS = {
+    "stream": {
+        "max_buffer_size": 16 * 1024 * 1024,
+    },
+    "http": {
+        "max_response_size": 16 * 1024 * 1024,
+    },
+    "redis": {
+        "max_response_size": 16 * 1024 * 1024,
+        "max_nesting_depth": 32,
+    },
+    "mqtt": {
+        "keepalive": 60,
+        "max_packet_size": 256 * 1024,
+        "max_queued_messages": 1024,
+    },
+}
+
+
 def _import_json_module():
     """Import ``json`` or ``ujson`` depending on the active Python runtime."""
     for module_name in ("json", "ujson"):
@@ -27,6 +46,7 @@ class SmallOSConfig:
     - ``priority_levels``: number of scheduler queues/categories
     - ``io_buffer_length``: buffered app output length when the terminal is hidden
     - ``eternal_watchers``: whether watcher-only runtimes should stay alive
+    - ``client_defaults``: shared network-client defaults grouped by protocol
 
     ``from_dict`` also accepts a couple of project-flavored aliases so existing
     notes like "OS list length" and "number of categories" map cleanly onto the
@@ -39,6 +59,7 @@ class SmallOSConfig:
         priority_levels=10,
         io_buffer_length=1024,
         eternal_watchers=False,
+        client_defaults=None,
     ):
         self.task_capacity = self._validate_positive_int("task_capacity", task_capacity)
         self.priority_levels = self._validate_positive_int("priority_levels", priority_levels)
@@ -46,6 +67,7 @@ class SmallOSConfig:
             raise ValueError("priority_levels must be at least 2.")
         self.io_buffer_length = self._validate_non_negative_int("io_buffer_length", io_buffer_length)
         self.eternal_watchers = bool(eternal_watchers)
+        self.client_defaults = self._normalize_client_defaults(client_defaults)
 
     @staticmethod
     def _validate_positive_int(name, value):
@@ -62,6 +84,39 @@ class SmallOSConfig:
         if value < 0:
             raise ValueError("{} must be 0 or greater.".format(name))
         return value
+
+    @classmethod
+    def _default_client_defaults(cls):
+        defaults = {}
+        for section, values in _DEFAULT_CLIENT_DEFAULTS.items():
+            defaults[section] = dict(values)
+        return defaults
+
+    @classmethod
+    def _normalize_client_defaults(cls, client_defaults):
+        if client_defaults is None:
+            return cls._default_client_defaults()
+        if not isinstance(client_defaults, dict):
+            raise TypeError("client_defaults must be a dict.")
+
+        normalized = cls._default_client_defaults()
+        for section, values in client_defaults.items():
+            if section not in normalized:
+                raise ValueError("Unsupported client config section {!r}.".format(section))
+            if values is None:
+                continue
+            if not isinstance(values, dict):
+                raise TypeError("client_defaults[{!r}] must be a dict.".format(section))
+            for key, value in values.items():
+                if key not in normalized[section]:
+                    raise ValueError(
+                        "Unsupported client config key {!r} for section {!r}.".format(key, section)
+                    )
+                normalized[section][key] = cls._validate_non_negative_int(
+                    "client_defaults.{}.{}".format(section, key),
+                    value,
+                )
+        return normalized
 
     @classmethod
     def default(cls):
@@ -83,6 +138,7 @@ class SmallOSConfig:
             priority_levels=data.get("priority_levels", data.get("num_categories", 10)),
             io_buffer_length=data.get("io_buffer_length", 1024),
             eternal_watchers=data.get("eternal_watchers", False),
+            client_defaults=data.get("client_defaults", data.get("clients")),
         )
 
     @classmethod
@@ -105,4 +161,18 @@ class SmallOSConfig:
             "priority_levels": self.priority_levels,
             "io_buffer_length": self.io_buffer_length,
             "eternal_watchers": self.eternal_watchers,
+            "client_defaults": self._default_client_defaults() if self.client_defaults is None else {
+                section: dict(values) for section, values in self.client_defaults.items()
+            },
         }
+
+    def client_defaults_for(self, section):
+        """
+        Return one client section merged with the shared stream-level defaults.
+
+        Protocol clients use this helper so callers can set a universal stream
+        cap once and then selectively override protocol-specific values.
+        """
+        defaults = dict(self.client_defaults.get("stream", {}))
+        defaults.update(self.client_defaults.get(section, {}))
+        return defaults

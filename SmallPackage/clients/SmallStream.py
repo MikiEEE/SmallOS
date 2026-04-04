@@ -7,9 +7,15 @@ stream abstraction so higher-level clients like Redis and MQTT can focus on
 their wire protocols instead of open/connect/send/read bookkeeping.
 """
 
+from ._client_config import MISSING, resolve_client_setting
+
 
 class StreamClosedError(Exception):
     """Raised when a peer closes the stream unexpectedly."""
+
+
+class StreamBufferOverflow(Exception):
+    """Raised when the internal read buffer exceeds its configured limit."""
 
 
 class SmallStream:
@@ -32,6 +38,7 @@ class SmallStream:
         tls_cert_file=None,
         tls_key_file=None,
         tls_verify=True,
+        max_buffer_size=MISSING,
     ):
         self.task = task
         self.host = host
@@ -42,6 +49,13 @@ class SmallStream:
         self.tls_cert_file = tls_cert_file
         self.tls_key_file = tls_key_file
         self.tls_verify = tls_verify
+        self.max_buffer_size = resolve_client_setting(
+            task,
+            "stream",
+            "max_buffer_size",
+            max_buffer_size,
+            16 * 1024 * 1024,
+        )
         self.sock = None
         self._connected = False
         self._buffer = bytearray()
@@ -160,8 +174,20 @@ class SmallStream:
 
     async def _fill_buffer(self, minimum):
         """Read from the socket until at least ``minimum`` buffered bytes exist."""
+        if self.max_buffer_size and minimum > self.max_buffer_size:
+            raise StreamBufferOverflow(
+                "requested read of {} bytes exceeds max_buffer_size ({})".format(
+                    minimum, self.max_buffer_size
+                )
+            )
         while len(self._buffer) < minimum:
             self._buffer.extend(await self.recv_some())
+            if self.max_buffer_size and len(self._buffer) > self.max_buffer_size:
+                raise StreamBufferOverflow(
+                    "read buffer exceeded max_buffer_size ({})".format(
+                        self.max_buffer_size
+                    )
+                )
         return
 
     async def read_exactly(self, size):
@@ -176,10 +202,18 @@ class SmallStream:
         del self._buffer[:size]
         return data
 
-    async def read_until(self, delimiter):
-        """Read until and including ``delimiter``."""
+    async def read_until(self, delimiter, max_length=0):
+        """Read until and including ``delimiter``.
+
+        If ``max_length`` is positive the search is capped at that many bytes.
+        When neither ``max_length`` nor ``max_buffer_size`` is set the buffer
+        can still grow without bound, but the default ``max_buffer_size``
+        provides a safety net.
+        """
         if not delimiter:
             raise ValueError("delimiter must not be empty")
+
+        effective_limit = max_length or self.max_buffer_size
 
         while True:
             index = self._buffer.find(delimiter)
@@ -188,4 +222,8 @@ class SmallStream:
                 data = bytes(self._buffer[:end])
                 del self._buffer[:end]
                 return data
+            if effective_limit and len(self._buffer) >= effective_limit:
+                raise StreamBufferOverflow(
+                    "delimiter not found within {} bytes".format(effective_limit)
+                )
             self._buffer.extend(await self.recv_some())
