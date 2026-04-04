@@ -28,12 +28,20 @@ class SmallStream:
         port,
         use_tls=False,
         server_hostname=None,
+        tls_ca_file=None,
+        tls_cert_file=None,
+        tls_key_file=None,
+        tls_verify=True,
     ):
         self.task = task
         self.host = host
         self.port = port
         self.use_tls = use_tls
         self.server_hostname = server_hostname or host
+        self.tls_ca_file = tls_ca_file
+        self.tls_cert_file = tls_cert_file
+        self.tls_key_file = tls_key_file
+        self.tls_verify = tls_verify
         self.sock = None
         self._connected = False
         self._buffer = bytearray()
@@ -65,7 +73,14 @@ class SmallStream:
                     raise OSError(pending_error, "socket connect failed")
 
             if self.use_tls:
-                sock = kernel.socket_wrap_tls_client(sock, server_hostname=self.server_hostname)
+                sock = kernel.socket_wrap_tls_client(
+                    sock,
+                    server_hostname=self.server_hostname,
+                    tls_ca_file=self.tls_ca_file,
+                    tls_cert_file=self.tls_cert_file,
+                    tls_key_file=self.tls_key_file,
+                    tls_verify=self.tls_verify,
+                )
                 while True:
                     try:
                         kernel.socket_do_handshake(sock)
