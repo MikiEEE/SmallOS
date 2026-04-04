@@ -13,6 +13,7 @@ That separation is what makes the project-specific features possible:
 
 from .awaitables import TaskInstruction
 from .SmallIO import SmallIO
+from .SmallConfig import SmallOSConfig
 from .OSlist import OSList
 from .SmallErrors import MaxProcessError, UnsupportedAwaitableError
 
@@ -30,20 +31,40 @@ class SmallOS(SmallIO):
     and easier to customize.
     """
 
-    def __init__(self, size=2**10, **kwargs):
-        """Create the runtime shell plus its task and shell registries."""
+    def __init__(self, size=None, config=None, **kwargs):
+        """
+        Create the runtime shell plus its task and shell registries.
+
+        ``config`` may be a ``SmallOSConfig`` instance or a plain dict. Older
+        constructor-style overrides such as ``size`` still work and take
+        precedence over the loaded config values when both are supplied.
+        """
+        config_overrides = {}
+        if size is not None:
+            config_overrides["task_capacity"] = size
+        if "priority_levels" in kwargs:
+            config_overrides["priority_levels"] = kwargs.pop("priority_levels")
+        if "io_buffer_length" in kwargs:
+            config_overrides["io_buffer_length"] = kwargs.pop("io_buffer_length")
+        if "eternal_watchers" in kwargs:
+            config_overrides["eternal_watchers"] = kwargs.pop("eternal_watchers")
+
+        self.config = SmallOSConfig.from_dict(config)
+        if config_overrides:
+            self.config = self.config.copy(**config_overrides)
+
         self.sleepTasks = []
         self.waitingTasks = []
         self.wakeUpdate = []
         self.ioReadWaiters = {}
         self.ioWriteWaiters = {}
         self.shells = []
-        self.tasks = OSList(10, size)
+        self.tasks = OSList(self.config.priority_levels, self.config.task_capacity)
         self.kernel = None
-        self.eternalWatchers = False
+        self.eternalWatchers = self.config.eternal_watchers
         self.cursor = None
 
-        SmallIO.__init__(self, 1024)
+        SmallIO.__init__(self, self.config.io_buffer_length)
         if kwargs:
             if kwargs.get("tasks", False):
                 self.fork(kwargs["tasks"])
@@ -70,7 +91,7 @@ class SmallOS(SmallIO):
         """
         while len(self.tasks) != 0:
             self._wake_sleeping_tasks()
-            self._wake_io_tasks(timeout=0)
+            self._wake_io_tasks(timeout_ms=0)
             self.cursor = self.tasks.pop()
 
             if self.cursor is None:
@@ -130,7 +151,7 @@ class SmallOS(SmallIO):
         if not self.kernel:
             return
 
-        for task in self.tasks.wake_sleeping(self.kernel.time_epoch()):
+        for task in self.tasks.wake_sleeping(self.kernel.scheduler_now_ms()):
             self.resume_task(task)
 
     def _idle_until_next_task(self):
@@ -147,16 +168,16 @@ class SmallOS(SmallIO):
         next_wake = self.tasks.next_wake_time()
         timeout = None
         if next_wake is not None:
-            timeout = max(0, next_wake - self.kernel.time_epoch())
+            timeout = max(0, next_wake - self.kernel.scheduler_now_ms())
 
         has_io_waiters = bool(self.ioReadWaiters or self.ioWriteWaiters)
         if next_wake is None and not has_io_waiters:
             return False
 
         if has_io_waiters and hasattr(self.kernel, "io_wait"):
-            self._wake_io_tasks(timeout=timeout)
-        elif timeout is not None and timeout > 0 and hasattr(self.kernel, "sleep"):
-            self.kernel.sleep(timeout)
+            self._wake_io_tasks(timeout_ms=timeout)
+        elif timeout is not None and timeout > 0 and hasattr(self.kernel, "sleep_ms"):
+            self.kernel.sleep_ms(timeout)
         return True
 
     def resume_task(self, task, value=_MISSING, exc=None, front=False):
@@ -220,7 +241,8 @@ class SmallOS(SmallIO):
                 self._finalize_task(task)
                 return
 
-            wake_time = self.kernel.time_epoch() + seconds if self.kernel else seconds
+            delay_ms = max(0, int(seconds * 1000))
+            wake_time = self.kernel.scheduler_now_ms() + delay_ms if self.kernel else delay_ms
             task.block("sleep")
             task._wake_at = wake_time
             self.tasks.add_sleeping(task, wake_time)
@@ -340,7 +362,7 @@ class SmallOS(SmallIO):
         if task not in waiters[io_obj]:
             waiters[io_obj].append(task)
 
-    def _wake_io_tasks(self, timeout=0):
+    def _wake_io_tasks(self, timeout_ms=0):
         """
         Ask the kernel which I/O objects are ready and resume their waiters.
 
@@ -356,7 +378,7 @@ class SmallOS(SmallIO):
         readable, writable = self.kernel.io_wait(
             list(self.ioReadWaiters.keys()),
             list(self.ioWriteWaiters.keys()),
-            timeout,
+            timeout_ms,
         )
         self._resume_io_waiters(readable, self.ioReadWaiters)
         self._resume_io_waiters(writable, self.ioWriteWaiters)
