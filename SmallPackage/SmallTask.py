@@ -1,398 +1,384 @@
-import traceback, asyncio
+"""
+Task object for the native smallOS coroutine runtime.
 
-from .async_util.iterator_util import is_iterator
+Each ``SmallTask`` owns the per-coroutine state that used to be split between
+generator helpers and ``asyncio`` tasks: pending resume values, terminal
+results, exceptions, and join bookkeeping. The scheduler can stay relatively
+small because most task-local lifecycle details live here.
+"""
 
-from .SmallErrors import PIDError
+import inspect
+
+from .awaitables import join_instruction, join_all_instruction
+from .SmallErrors import PIDError, TaskCancelledError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
 from .TaskState import TaskState
 
 
+_MISSING = object()
+
 
 class SmallTask(SmallSignals, Node):
-    '''
-    @Class smallTask() - Object that contains Tasks contents: The routine,
-        information, name, ID number, signals and other functions that tasks
-        will need to interact with the OS and other Tasks.
-    '''
+    """
+    Priority-scheduled unit of execution managed by ``SmallOS``.
 
+    The important design change from the old hybrid runtime is that a task now
+    stores and drives its coroutine directly. That keeps resume timing and
+    priority ordering under smallOS control instead of delegating that behavior
+    to ``asyncio``.
+    """
 
-    def __init__(self,priority,routine,**kwargs):
-        '''
-        @function __init__() - initializes variables to be used
-            during normal functions.
-        @param priority - int() - assigned priority of the Task object when
-            compared to by the OS
-        @param routine - func(OSobj,self) - function to be perfomed during the running of
-            the task.
-        @param isReady - bool() - intialialize the task to be
-            ready from the beginning when true.
-        @kwargs-
-            @arg name - str() - optional parameter, add name to the Task.
-            @arg update - obj() - optional parameter, update function that
-                interacts with task  ready state.
-                ***NOTE: Class must contain updateOBJ.update()
-                ***NOTE: Updates must also return a 1 to signal to the task
-                    to be ready.
-            @arg handler - func(OSobj,self,sig) - signal handler function to
-                perform actions during the event of a signal being
-                recieved.
-            @arg parent - task() - parent task that spawned this current task
-            @arg args - tuple(obj) - list of arguments to be passed in when routine is called.
-        '''
+    def __init__(self, priority, routine, **kwargs):
+        """
+        Create a task shell around a routine or coroutine object.
 
-        self.pid =  -1
+        ``routine`` is usually an ``async def`` function that accepts the task as
+        its first argument. Extra user arguments are stored in ``args`` and are
+        applied lazily the first time the task is stepped.
+        """
+        self.pid = -1
         self.priority = priority
         self.isReady = 1
         self.isLocked = 0
         self.isWatcher = False
         self.parent = None
         self.OS = None
-        self.placeholder  = 0
         self.state = TaskState()
-        self.children = list()
-        self.f = None
-
-        #Set the return value to the OS.
-        return_val = {'return_status':0}
-        self.state.update(return_val,'system')
-
-        self.routine = self.wrap(routine)
-
-
-        SmallSignals.__init__(self,self.OS,kwargs)
-        Node.__init__(self)
-
-        #Async
-        self.asyncTaskHandle = None
-        self.isInProgress = 0 
-        self.isAsync = 0
-
-
-        #NEEDS to be changed to function with state preserved in the task
+        self.children = []
+        self.name = ""
+        self.args = ()
         self.updateFunc = None
+        self.routine = routine
+
+        self._coroutine = None
+        self._done = False
+        self._result = None
+        self._exception = None
+        self._queued = False
+        self._blocked_reason = None
+        self._wake_at = None
+        self._pending_send = _MISSING
+        self._pending_throw = None
+        self._waiting_signal = None
+        self._join_target = None
+        self._join_targets = None
+        self._join_pending = set()
+        self._join_waiters = []
+        self._io_wait_obj = None
+        self._io_wait_mode = None
+
+        self.state.update({"return_status": 0}, "system")
+
+        SmallSignals.__init__(self, self.OS, kwargs)
 
         if kwargs:
-            if kwargs.get('name',False):
-                self.name = kwargs['name']
-            if kwargs.get('update',False):
-                self.updateFunc = kwargs['update']
-            if kwargs.get('parent',False):
-                self.parent = kwargs['parent']
-            if kwargs.get('isReady',False):
-                self.isReady = kwargs['isReady']
-            if kwargs.get('isWatcher',False):
-                self.isWatcher = kwargs['isWatcher']
-            if kwargs.get('isAsync', False):
-                self.isAsync = kwargs['isAsync']
-            if kwargs.get('args', False):
-                self.args = kwargs['args']
+            if "name" in kwargs:
+                self.name = kwargs["name"]
+            if "update" in kwargs:
+                self.updateFunc = kwargs["update"]
+            if "parent" in kwargs:
+                self.parent = kwargs["parent"]
+            if "isReady" in kwargs:
+                self.isReady = kwargs["isReady"]
+            if "isWatcher" in kwargs:
+                self.isWatcher = kwargs["isWatcher"]
+            if "args" in kwargs:
+                self.args = kwargs["args"]
 
-        return
+    @property
+    def done(self):
+        """Whether the task has reached a terminal state."""
+        return self._done
 
+    @property
+    def result(self):
+        """Return the stored result after successful completion."""
+        return self._result
 
-    def wrap(self, func):
-        def wrapper(self):
+    @property
+    def exception(self):
+        """Return the stored terminal exception, if any."""
+        return self._exception
 
-            data = self.state.getState(None,'system')
-            if self.isAsync: 
-                async def newRoutine(self):
-                    try:
-                        await func(self)
-                    except asyncio.CancelledError as e:
-                        self.isInProgress = 0
-                    except Exception as e:
-                        raise e
-                    finally:
-                        self.isInProgress = 0
-                        
-                if data[0].get('has_run',-1) == -1:
-                    blob = data[0]
-                    blob['has_run'] = 1
-                    self.state.update(blob,'system')
-                    self.isInProgress = 1
-                    self.asyncTaskHandle = asyncio.create_task(newRoutine(self))
+    def _invoke_routine(self):
+        """Call the user routine using the task's stored argument convention."""
+        if self.args == ():
+            return self.routine(self)
+        if isinstance(self.args, tuple):
+            return self.routine(self, *self.args)
+        if isinstance(self.args, list):
+            return self.routine(self, *self.args)
+        if isinstance(self.args, dict):
+            return self.routine(self, **self.args)
+        return self.routine(self, self.args)
+
+    def _ensure_coroutine(self):
+        """
+        Materialize the coroutine the first time the task actually runs.
+
+        This lazy setup is intentional: spawning a task should register work, not
+        execute user code immediately.
+        """
+        if self._coroutine is not None or self._done:
+            return
+
+        if self.routine is None:
+            self.complete(None)
+            return
+
+        if inspect.isawaitable(self.routine) and not callable(self.routine):
+            candidate = self.routine
+        else:
+            candidate = self._invoke_routine()
+
+        if inspect.isawaitable(candidate):
+            if hasattr(candidate, "send") and hasattr(candidate, "throw"):
+                self._coroutine = candidate
             else:
-                if not self.f:
-                    self.f = func(self)
+                self._coroutine = candidate.__await__()
+            return
 
-                if is_iterator(self.f):
-                    try:
-                        sendable = None
-                        if data[0].get('has_run',-1) == -1:
-                            blob = data[0]
-                            blob['has_run'] = 1
-                            self.state.update(blob,'system')
-                        else:
-                            sendable = self.state.getState('asyncResults','system')[0]
-                        self.f.send(sendable)   
-                    except StopIteration as e:
-                        self.f.close()
-                else:
-                    if data[0].get('has_run',-1) == -1:
-                        blob = data[0]
-                        blob['has_run'] = 1
-                        blob['return_status'] = 0
-                        self.state.update(blob,'system')
-            return self.state.getState('return_status','system')[0]
-        return wrapper
-            
+        self.complete(candidate)
+
+    def execute(self):
+        """
+        Advance the task by exactly one scheduler step.
+
+        The scheduler either sends a resume value back in, throws an exception
+        back in, or starts the coroutine for the first time. Whatever the
+        coroutine yields is handed back to ``SmallOS`` for interpretation.
+        """
+        if not self.getExeStatus():
+            return None
+
+        self.isReady = 0
+        self._ensure_coroutine()
+        if self._done:
+            return None
+
+        try:
+            if self._pending_throw is not None:
+                # Resume by injecting an event such as cancellation or a failed
+                # joined child back into the coroutine.
+                exc = self._pending_throw
+                self._pending_throw = None
+                yielded = self._coroutine.throw(exc)
+            else:
+                send_value = None
+                if self._pending_send is not _MISSING:
+                    # Sleep/signal/join completions resume the coroutine with a
+                    # value, which becomes the result of the awaited call.
+                    send_value = self._pending_send
+                    self._pending_send = _MISSING
+                yielded = self._coroutine.send(send_value)
+        except StopIteration as stop:
+            self.complete(stop.value)
+            return None
+        except Exception as exc:
+            self.fail(exc)
+            return None
+
+        return yielded
 
     def excecute(self):
-        '''
-        @function execute() - Checks to see if the task() is ready
-            or locked. If the task() is not locked and ready the routine()
-            function is executed.
-        @return - int - the result of the routine. 0 executed | -1 not executed
-        '''
-        if not self.routine: return 0
-        if self.isReady and not self.isLocked:
-            self.isReady = 0
-            result = self.routine(self)
-            return result   
-        else:
-            return -1
-
+        """Compatibility alias for the project's historical misspelling."""
+        return self.execute()
 
     def update(self):
-        '''
-        @function update() - calls the passed in update function()
-            if the status returned from the update function is a 1
-            then the isReady state is set to 1.
-        @return - int - 0 for success
-            and -1 for a non exsistent update function.
-        '''
-
-        # if self.isSleep == 1 or self.isWaiting == 1:
-        #     return 0
+        """Run an optional readiness callback used by legacy task styles."""
         if self.updateFunc:
             if self.updateFunc(self) == 1:
                 self.isReady = 1
             return 0
-        else:
-            return -1
+        return -1
 
+    def complete(self, result):
+        """Mark the task as successfully finished and store its result."""
+        self._done = True
+        self._result = result
+        self._blocked_reason = None
+        self._wake_at = None
+        self._waiting_signal = None
+        self._io_wait_obj = None
+        self._io_wait_mode = None
+        self.isReady = 0
+        self.isWaiting = 0
+        self.isSleep = 0
+        self.state.update({"return_status": 0, "result": result}, "system")
+        return result
+
+    def fail(self, exc):
+        """Mark the task as failed and store its terminal exception."""
+        self._done = True
+        self._exception = exc
+        self._blocked_reason = None
+        self._wake_at = None
+        self._waiting_signal = None
+        self._io_wait_obj = None
+        self._io_wait_mode = None
+        self.isReady = 0
+        self.isWaiting = 0
+        self.isSleep = 0
+        self.state.update({"return_status": -1, "exception": exc}, "system")
+        return exc
+
+    def cancel(self, message="Task cancelled"):
+        """
+        Force the task into a cancelled terminal state.
+
+        If the coroutine exists we close it first so we do not keep stale frames
+        alive after the runtime has decided this task is done.
+        """
+        if self._done:
+            return
+
+        if self._coroutine is not None:
+            try:
+                self._coroutine.close()
+            except RuntimeError:
+                pass
+        self.fail(TaskCancelledError(message))
+
+    def resume(self, value=_MISSING, exc=None):
+        """
+        Prepare the task to run again after a wait condition completes.
+
+        ``value`` is sent into the coroutine on the next step. ``exc`` is thrown
+        into it instead. The scheduler chooses which of those channels to use.
+        """
+        self._blocked_reason = None
+        self._wake_at = None
+        self._waiting_signal = None
+        self._io_wait_obj = None
+        self._io_wait_mode = None
+        self.isReady = 1
+        self.isWaiting = 0
+        self.isSleep = 0
+        self._pending_send = value
+        self._pending_throw = exc
+
+    def block(self, reason):
+        """Record why the task is no longer runnable."""
+        self._blocked_reason = reason
+        self.isReady = 0
+        self.isWaiting = 1 if reason in ("signal", "join", "join_all") else 0
+        self.isSleep = 1 if reason == "sleep" else 0
+        self.state.update({"return_status": 1, "blocked_reason": reason}, "system")
 
     def setID(self, pid):
-        '''
-        @function setID() - sets the process ID of the task.
-        @param pid - int - number to be assigned as the identifier
-            of the task.
-        @return void
-        '''
-
-        if isinstance(pid,int):
+        """Assign the PID chosen by ``SmallOS`` exactly once."""
+        if isinstance(pid, int):
             if self.pid == -1:
                 self.pid = pid
             else:
-                raise PIDError('PID can only be set once.')
+                raise PIDError("PID can only be set once.")
         else:
-            traceback.format_exc()
-            raise TypeError('PID must be type Int')
+            raise TypeError("PID must be type Int")
         return
 
-
     def getID(self):
-        '''
-        @function getID() - returns the process ID
-        @return pid -int- process identifier.
-        '''
+        """Return the task PID."""
         return self.pid
 
-
     def setOS(self, OS):
-        '''
-        @function setOS - sets the object's OS to the current OS.
-        '''
+        """Attach the task to its owning runtime."""
         self.OS = OS
 
-
-    def build(self,priority,task,ready=1,name='',parent=None):
-            '''
-            @function build - lets the smallsignal class create smallTasks. 
-            @return - smallTask() 
-            '''
-            task = SmallTask(priority,
-                            task,
-                            isReady=ready,
-                            name=name,
-                            parent=parent)
-            return task
-
-
-    def fork(self,new_task):
-        '''
-        @function fork - taks in smallTasks and feeds them to to smallOS 
-            labels the tasks as children.
-        '''
-
-        new_task.parent = self
-        pid = self.OS.fork(new_task)
-        self.children.append(pid)
-        return pid
-    
-    ##Change this into a function that is a generator that 
-    # spanws a process that spawns off the children and then wrap the children so that when they are 
-    # done they trigger a signal handler in the generator process that records it as done and then
-    # checks status of all other children. When they are done, feed the data to this process 
-    # so that the original task in the demo can call next() on the waitOnasync function and get an array
-    # of results. 
-    def waitOnAsync(self, newTasks, priority=None):
-   
-        def wrapChildren(routine):
-            async def newRoutine(self):
-                data = await routine(self)
-                parentState = self.parent.state.getState(None,'system')[0]
-                parentState['asyncResults'][self.args['asyncArrayPlace']] = data
-                self.parent.state.update(parentState, 'system')
-                parentPid = self.parent.getID()
-                result = self.sendSignal(parentPid,6)
-                if result != 0:
-                    data = self.state.getState(None,'system')[0]
-                    data['return_status'] = -1
-                    self.state.update(data,'system')
-                return
-            return newRoutine
-        
-        def handleFinishedAsync(self):
-            if self.checkSignal(6):
-                flag = True
-                pids = self.state.getState('pids','system')[0]
-                for pid in pids:
-                    child = self.OS.tasks.search(pid)
-                    if child == -1:
-                        flag &= True 
-                    else:
-                        flag &= bool(child.asyncTaskHandle) and child.asyncTaskHandle.done()
-                if flag:
-                    self.sendSignal(self.getID(), 7)
-            return
-
-        def spawnerRoutine(self):
-            name = 'ChildOf ' + str(self.getID())
-            pids = []
-            asyncResults = [None] * len(self.args['tasks'])
-            for num, asyncTask in enumerate(self.args['tasks']):
-                task = SmallTask(priority,
-                                    wrapChildren(asyncTask),
-                                    name=name,
-                                    isAsync=1,
-                                    args={'asyncArrayPlace': num})
-                pids.append(self.fork(task))
-            self.state.update({
-                            'pids': pids,
-                            'asyncResults': asyncResults
-                            }, 
-                            'system'
-                            )
-            yield self.sigSuspendV2(7)
-            parentState = self.parent.state.getState(None,'system')[0]
-            parentState['asyncResults'] = self.state.getState(None,'system')[0]['asyncResults']
-            self.parent.state.update(parentState,'system')   
-            self.sendSignal(self.parent.getID(),5)
-            return 
-        
-        if not priority:
-            priority = self.priority
-
-        parentPid = self.getID()
-        name = 'ChildOf ' + str(self.getID())
-
-        self.sigSuspendV2(5)
-
-        args = {
-            "tasks": newTasks,
-        }
-        #For some reason extra handler pops up on task list
-        asyncSpawner = SmallTask(
+    def build(self, priority, task, ready=1, name="", parent=None):
+        """Compatibility helper used by legacy code paths."""
+        return SmallTask(
             priority,
-            spawnerRoutine,
+            task,
+            isReady=ready,
             name=name,
-            parent=parentPid,
-            handlers=handleFinishedAsync,
-            args=args
+            parent=parent,
         )
 
-        self.fork(asyncSpawner)
+    def spawn(self, routine, priority=None, **kwargs):
+        """
+        Create and register a child task on the same runtime.
 
-        return 
+        The returned object is the child task itself so callers can hand it
+        directly to ``await task.join(...)`` or ``await task.join_all(...)``.
+        """
+        if not self.OS:
+            raise RuntimeError("Task must belong to an OS before it can spawn children.")
 
+        child = routine
+        if not isinstance(child, SmallTask):
+            child = SmallTask(priority or self.priority, routine, **kwargs)
+        elif priority is not None:
+            child.priority = priority
 
-    def kill(self, flags={}):
-        if not self.OS: return -1
+        child.parent = self
+        self.OS.fork(child)
+        self.children.append(child.getID())
+        return child
 
-        if self.isAsync:
-            self.asyncTaskHandle.cancel()
+    def fork(self, new_task):
+        """Compatibility wrapper that returns the new child PID."""
+        child = self.spawn(new_task)
+        return child.getID()
 
-        #Parent of negative one indicates a child has been orphaned. 
-        for childID in self.children:
-            child = self.OS.tasks.search(childID)
+    def join(self, child):
+        """Return the awaitable used to wait for one child task."""
+        return join_instruction(child)
 
-            if child != -1:
-                child.parent = -1 
-            
-        if '-r' in flags:
-            for child in self.children:
-                child.kill()
-        
-        if self.parent and self.parent != -1:
-            self.parent.children.remove(self.getID())
-         
-        self.OS.tasks.delete(self.getID())
+    def join_all(self, children):
+        """Return the awaitable used to wait for several child tasks."""
+        return join_all_instruction(children)
 
+    def add_join_waiter(self, waiter):
+        """Register a task that is currently waiting on this task."""
+        if waiter not in self._join_waiters:
+            self._join_waiters.append(waiter)
+
+    def discard_join_waiter(self, waiter):
+        """Remove a waiter once it no longer depends on this task."""
+        while waiter in self._join_waiters:
+            self._join_waiters.remove(waiter)
+
+    def kill(self, flags=None):
+        """Request scheduler-managed cancellation of this task."""
+        flags = flags or {}
+        if not self.OS:
+            self.cancel()
+            return -1
+        return self.OS.cancel_task(self, recursive="-r" in flags)
 
     def getExeStatus(self):
-        '''
-        @function getExeStatus() - Checks all of the process's statuses to see
-            if the process is ready to be executed. 
-        @return - bool - True for if the Task can be Executed and False if 
-            it is not. 
-        '''
-        status = (self.isReady == 1) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.isInProgress == 0)
-        return status 
-
+        """Report whether the scheduler may run this task right now."""
+        return bool(self.isReady) and not self.isLocked and not self._done
 
     def getDelStatus(self):
-        '''
-        @function getDelStatus() - Checks all of the process's statuses to 
-        see if the process needs to be deleted.
-        @return - bool - True for if the process can be deleted and False if 
-            it can not.       
-        '''
-        status = (self.isReady == 0) and (self.isWaiting == 0)
-        status &= (self.isSleep == 0) and (self.isAsync == 0 or self.asyncTaskHandle.done())
-        status &= not self.isWatcher
-        return status 
-
+        """Report whether the task is terminal and removable."""
+        return self._done and not self.isWatcher
 
     def stat(self):
-        '''
-        @function stat() - gets a string of the statuses in greater detail. 
-        '''
-        msg = "\nisReady={}\nisWaiting={}\nisSleep={}\n".format(self.isReady,
-                                                    self.isWaiting,
-                                                    self.isSleep)
-        msg = str(self) + msg
-        return msg
-
+        """Return an expanded debug dump for shell-style inspection."""
+        msg = "\nisReady={}\nisWaiting={}\nisSleep={}\n".format(
+            self.isReady,
+            self.isWaiting,
+            self.isSleep,
+        )
+        msg += "blocked_reason={}\n".format(self._blocked_reason)
+        msg += "done={}\n".format(self.done)
+        if self.exception is not None:
+            msg += "exception={!r}\n".format(self.exception)
+        return str(self) + msg
 
     def __str__(self):
-        '''
-        @function __str__() - returns the string reprsentation of the
-            Task
-        '''
-        name =''
-        if self.name == '':
-            name = 'Unamed Process'
-        else:
-            name = self.name
-        return 'PID={}, name={}, priority={}, ExeStatus={}, DelStatus={}, isAsync={}'.format(self.pid,
-                                                    name,
-                                                    self.priority,
-                                                    self.getExeStatus(),
-                                                    self.getDelStatus(),
-                                                    self.isAsync)
-
-
-
+        """Return a compact single-line summary of the task state."""
+        name = self.name or "Unamed Process"
+        return (
+            "PID={}, name={}, priority={}, ExeStatus={}, DelStatus={}, blocked={}, done={}"
+        ).format(
+            self.pid,
+            name,
+            self.priority,
+            self.getExeStatus(),
+            self.getDelStatus(),
+            self._blocked_reason,
+            self.done,
+        )
