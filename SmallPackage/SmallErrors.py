@@ -24,3 +24,18 @@ class AsyncSuspensionError(Exception):
 	'''
 	Raised When Someone Tries To Suspend an Async Function.
 	'''
+	pass
+
+
+class UnsupportedAwaitableError(Exception):
+	'''
+	Raised when a task yields an awaitable the smallOS scheduler does not own.
+	'''
+	pass
+
+
+class TaskCancelledError(Exception):
+	'''
+	Raised inside a waiting task when a joined task is cancelled.
+	'''
+	pass
