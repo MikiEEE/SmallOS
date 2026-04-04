@@ -1,105 +1,62 @@
 import sys
-sys.path.append('..')
+import unittest
 
-from nose.tools import assert_raises
-from SmallPackage.list_util.binSearchList import search, insert
-from SmallPackage.SmallTask import smallTask
+sys.path.append("..")
 
-
-class element():
-	def __init__(self, num):
-		self.num = num
+from SmallPackage.list_util.binSearchList import insert, search
 
 
-def buildList(func):
-	testList = range(1000)
-	def wrapper():
-		func(testList)
-		return
-	return wrapper
+class Element:
+    def __init__(self, num):
+        self.num = num
 
 
-def buildSpecialList(func):
-	testList = [element(num) for num in range(1000)]
-	def wrapper():
-		func(testList)
-		return
-	return wrapper
+class TestBinSearchList(unittest.TestCase):
+    def test_search_out_of_bounds_raises(self):
+        data = list(range(100))
+
+        with self.assertRaises(IndexError):
+            search(data, 100, 0, len(data) + 1)
+
+        with self.assertRaises(IndexError):
+            search(data, -1, -1, len(data))
+
+    def test_search_finds_existing_items(self):
+        data = list(range(100))
+
+        for target in data:
+            index = search(data, target, 0, len(data))
+            self.assertEqual(target, data[index])
+
+    def test_search_returns_missing_for_unknown_item(self):
+        data = list(range(100))
+        self.assertEqual(-1, search(data, 500, 0, len(data)))
+
+    def test_search_supports_custom_extractor(self):
+        data = [Element(num) for num in range(100)]
+        extractor = lambda items, index: items[index].num
+
+        for target in range(100):
+            index = search(data, target, 0, len(data), extractor)
+            self.assertNotEqual(-1, index)
+            self.assertEqual(target, data[index].num)
+
+    def test_insert_out_of_bounds_raises(self):
+        data = list(range(100))
+
+        with self.assertRaises(IndexError):
+            insert(data, 100, 0, len(data) + 1)
+
+        with self.assertRaises(IndexError):
+            insert(data, -1, -1, len(data))
+
+    def test_insert_returns_sorted_insertion_point(self):
+        data = [0, 2, 4, 6]
+
+        self.assertEqual(0, insert(data, -1, 0, len(data)))
+        self.assertEqual(2, insert(data, 3, 0, len(data)))
+        self.assertEqual(len(data), insert(data, 10, 0, len(data)))
 
 
-	
-
-@buildList
-def test_search_outOfBound(testList):
-	#test for index above range
-	length = len(testList) + 1
-	target = length
-	assert_raises(IndexError,search,testList,target,0,length)
-
-	#test for index out of range
-	length -= 1
-	target = -1
-	assert_raises(IndexError,search,testList,target,-1,length)
-	return 
-
-
-@buildList
-def test_search_there(testList):
-	#test for all elements when in the list.
-	length = len(testList)
-	for num in testList:
-		result = search(testList,num,0,length)
-		assert testList[result] == num
-	return 
-
-
-@buildList
-def test_search_notThere(testList):
-	#tests for when elements aren't in the list
-	length = len(testList)
-	for num in testList:
-		result = search(testList,-1,0,length)
-		assert result == -1
-	return
-
-
-@buildSpecialList
-def test_search_lambda(testList):
-	#test search functionality with a lambda extraction
-	extract = lambda tList, index: tList[index].num
-	length = len(testList)
-
-	for num, obj in enumerate(testList):
-		target = num
-		result = search(testList,target,0,length,extract)
-		assert result != -1
-	return
-
-
-@buildList
-def test_insert_outOfBound(testList):
-	#test for index above range
-	length = len(testList) + 1
-	target = length
-	assert_raises(IndexError,insert,testList,target,0,length)
-
-	#test for index out of range
-	length -= 1
-	target = -1
-	assert_raises(IndexError,insert,testList,target,-1,length)
-	return 	
-
-@buildList
-def test_insert(testList):
-	length = len(testList)
-
-	for num in range(2*length):
-
-
-
-if __name__ == '__main__':
-	testList = range(1000)
-	length = len(testList) + 1
-	target = length
-	assert search(testList,target,0,length) == -1
-
+if __name__ == "__main__":
+    unittest.main()

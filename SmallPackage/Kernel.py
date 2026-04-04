@@ -1,5 +1,6 @@
 import sys
 import time
+import select
 
 
 
@@ -19,6 +20,12 @@ class Kernel():
 
 	def time_epoch(self):
 		pass
+
+	def sleep(self, secs):
+		pass
+
+	def io_wait(self, readables, writables, timeout=None):
+		return [], []
 	
 
 
@@ -40,6 +47,18 @@ class Unix(Kernel):
 	def time_epoch(self):
 		return time.time()
 
+	def sleep(self, secs):
+		time.sleep(secs)
+		return
+
+	def io_wait(self, readables, writables, timeout=None):
+		if not readables and not writables:
+			if timeout and timeout > 0:
+				time.sleep(timeout)
+			return [], []
+		ready_read, ready_write, _ = select.select(readables, writables, [], timeout)
+		return ready_read, ready_write
+
 	def socket_send(self, data):
 		return 
 
@@ -58,7 +77,5 @@ class ESP8266(Kernel):
 
 	def __init__(self):
 		pass
-
-
 
 

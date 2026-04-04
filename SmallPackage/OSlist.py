@@ -1,324 +1,167 @@
+"""
+Task registry and scheduling queues for smallOS.
 
+The runtime needs two different access patterns:
+- look up a task quickly by PID
+- choose the next runnable task by priority
 
-from .list_util.linkedList import insertNext, removeNode
+This module keeps those responsibilities together so the scheduler can stay
+small and focused. PID lookup uses a sorted list, ready tasks live in one FIFO
+queue per priority, and sleeping tasks live in a wake-time heap.
+"""
+
+from collections import deque
+import heapq
+
 from .list_util.binSearchList import insert, search
-from .SmallPID import SmallPID 
-
-# import time
+from .SmallPID import SmallPID
 
 
-
-
-
-
-
-
-
-class OSList(SmallPID): 
-    '''
-    @class OSList - Creates Binary Search List that contains
-        elements of class SmallTask(). All elements are stored
-        in the list by order of PID; however all elements are also 
-        Nodes of a LinkedList that is sorted by priority. 
-        
-        Plan on adding a speed optimized and less space efficient mode 
-        in the near future.
-    '''
+class OSList(SmallPID):
+    """
+    Combined PID registry and queue manager for the cooperative scheduler.
+    """
 
     def __init__(self, priors=5, length=2**12):
-        '''
-        @function __init__() - takes in the number of priorities to be  
-            used in the OS to create the linked list and takes in the
-            amount of allowed processes and sets up the datastructures. 
-        @param proiors - int - the number of priorities allowed on the system. 
-                                numbers: 0 - (priors - 1)
-        @length - int - the number of allowed processes. 
-        '''
-        SmallPID.__init__(self,length)
-        self.cats = [None] * priors
-        self.catSelect = 0
-        self.tasks = list()
-        self.current = None
-        self.sleepList = None
-        self.func = lambda data, index: data[index].getID()
+        """Create the PID registry plus ready/sleep queue structures."""
+        SmallPID.__init__(self, length)
+        self.num_priorities = priors
+        self.tasks = []
+        self.ready = [deque() for _ in range(priors)]
+        self.sleeping = []
+        self._sleep_seq = 0
         self.numWatchers = 0
-        return 
-
+        self.func = lambda data, index: data[index].getID()
 
     def resetCatSel(self):
-        '''
-        @function resetCatSel() - reinitializes the catSelect variable to 
-            zero so self.pop() function can start from the highest priority. 
-        @return - void 
-        '''
-        catSelect = 0
-        return 
-
-
-    def setCatSel(self, newSel):
-        '''
-        @function setCatSel() - when a valid higher priority task is
-            added to the tasklist the next self.pop() result will be set to 
-            look to that higher priority rather then the previous next element. 
-
-            ***Note***
-            Accomplishes this by seting current to None so when pop() is called
-            it looks for the next available category.
-        
-        @param newSel - the priority of the new task. 
-        @return - int - 0 on a valid priority and -1 on an invalid priority. 
-        '''
-        if 0 <= newSel < len(self.cats):
-            if self.catSelect > newSel:
-                self.catSelect = newSel
-                self.current = None
-            return 0
-        return -1
-
-
-    def availCat(self,sel=0):
-        '''
-        @function availCat() - goes through the categories 
-            and finds the next available task category. 
-        @param sel - int - the starting index of of the category select
-            list. 
-        @return - SmallTask() - a non-void task to be executed. 
-        '''
-        result = None
-        for task in self.cats[sel:]:
-            if task != None:
-                result = task
-                break
-        return result
-
-
-    def incrementCat(self):
-        '''
-        @function incrementCat() - increments the category tracker
-            by 1 and if the ctracker is out of array bounds, the tracker
-            is set back to 0. 
-        @return - void
-        '''
-        if self.catSelect < len(self.cats):
-            self.catSelect += 1
-        if self.catSelect == len(self.cats):
-            self.catSelect = 0
-        return 
-
-
-    def pop(self):
-        '''
-        @function pop() - gets the current highest priority node 
-            in the queue, works through the entire queue.
-        @return - SmallTask() - the highest priority object 
-            in the queue.
-        '''
-        if self.current == None:
-            self.current = self.availCat()
-        elif self.current.next != None:
-            self.current = self.current.next
-        else: 
-            self.incrementCat()
-            self.current = self.availCat(self.catSelect)
-
-        if self.current != None and self.current.priority >  self.catSelect:
-            self.catSelect = self.current.priority
-
-        return self.current
-
+        """Compatibility no-op kept for older callers."""
+        return
 
     def insert(self, task):
-        '''
-        @function insert() - inserts the task 
-            inorder (by pid) in the task list array and adds 
-            task to a doubly-linked-list in order (by priority)
-        @param task - SmallTask() - to be added to the OSlist.
-        @return - int - positive integer on success, -1 on failure. 
-        '''
+        """Assign a PID and register a task in the PID-sorted backing list."""
         priority = task.priority
-        if 0 < priority < len(self.cats):
+        if not 0 < priority < self.num_priorities:
+            return -1
 
-            pid = self.newPID()
-            if pid == -1: return -1
+        pid = self.newPID()
+        if pid == -1:
+            return -1
 
-            task.setID(pid)
+        task.setID(pid)
+        if task.isWatcher:
+            self.numWatchers += 1
 
-            if task.isWatcher:
-                self.numWatchers += 1
+        index = insert(self.tasks, pid, 0, len(self.tasks), func=self.func)
+        self.tasks.insert(index, task)
+        return pid
 
-            length = len(self.tasks)
-
-            index = insert(self.tasks,pid,0,length,func=self.func)
-            self.tasks.insert(index, task)
-
-            #If there is no task with that priority make it the head of the 
-            #list node. Otherwise add it onto the list sorted by priority.
-            if self.cats[priority] == None:
-                self.cats[priority] = self.tasks[index]
-            else:
-                insertNext(self.cats[priority],task)
-
-            #If a higher priority task is added then the current running 
-            # priority it will be set.
-            self.setCatSel(priority)
-            return pid
-        return -1
-
-
-    def search(self,pid):
-        '''
-        @function search() - performs binary search to find and retrieve 
-            a process by pid. 
-        @param pid - int - the pid of the requested process. 
-        @return - SmallTask() on success | -1 on Failure - returns the task with 
-            the matching pid on success and -1 if a process with that pid does not exist.  
-        '''
+    def search(self, pid):
+        """Look up a task by PID."""
         length = len(self.tasks)
-        index = search(self.tasks,pid,0,length,self.func)
-        if index == -1: return index
+        index = search(self.tasks, pid, 0, length, self.func)
+        if index == -1:
+            return -1
         return self.tasks[index]
 
-
-    def delete(self,pid):
-        '''
-        @function delete() - performs binary search to find and delete a process
-            by pid.
-        @param pid - int - the pid of the requested process.
-        @return  - int - 0 on successful deletion and -1 if the process is not
-            found.
-        '''
+    def delete(self, pid):
+        """Remove a task from PID storage and watcher accounting."""
         length = len(self.tasks)
-        index = search(self.tasks,pid,0,length,self.func)
-        if index == -1: return -1
+        index = search(self.tasks, pid, 0, length, self.func)
+        if index == -1:
+            return -1
 
-        removeNode(self.tasks[index])
-        priority = self.tasks[index].priority
-
-        if not self.tasks[index].isSleep and self.cats[priority].getID() == self.tasks[index].getID():
-            self.cats[priority] = self.cats[priority].next
-
-        if self.tasks[index].isWatcher:
+        task = self.tasks[index]
+        if task.isWatcher:
             self.numWatchers -= 1
-
-        if self.numWatchers < 0:
-            raise ValueError('There cannot be negative number of watchers.')
-        
         del self.tasks[index]
-
         self.freePID(pid)
         return 0
 
+    def enqueue(self, task, front=False):
+        """
+        Put a runnable task on its per-priority ready queue.
+
+        ``front=True`` is used when a task should resume before other tasks of
+        the same priority, such as when a join or signal completes.
+        """
+        if task == -1 or task is None or task.done:
+            return -1
+        if self.search(task.getID()) == -1:
+            return -1
+        if task._queued:
+            return 0
+
+        queue = self.ready[task.priority]
+        if front:
+            queue.appendleft(task)
+        else:
+            queue.append(task)
+        task._queued = True
+        return 0
+
+    def pop(self):
+        """
+        Return the next runnable task.
+
+        Lower numeric priority values run first. Within the same priority,
+        arrival order is preserved by the deque.
+        """
+        for priority in range(1, self.num_priorities):
+            queue = self.ready[priority]
+            while queue:
+                task = queue.popleft()
+                task._queued = False
+                if self.search(task.getID()) == -1:
+                    continue
+                if not task.getExeStatus():
+                    continue
+                return task
+        return None
+
+    def add_sleeping(self, task, wake_time):
+        """Push a sleeping task onto the wake-time heap."""
+        self._sleep_seq += 1
+        heapq.heappush(self.sleeping, (wake_time, self._sleep_seq, task))
+
+    def wake_sleeping(self, now):
+        """
+        Return every task whose scheduled wake time has arrived.
+
+        Stale heap entries are ignored so cancelled or already-resumed tasks do
+        not need to be eagerly removed from the heap.
+        """
+        ready = []
+        while self.sleeping and self.sleeping[0][0] <= now:
+            _, _, task = heapq.heappop(self.sleeping)
+            if self.search(task.getID()) == -1:
+                continue
+            if task.done or task._blocked_reason != "sleep":
+                continue
+            ready.append(task)
+        return ready
+
+    def next_wake_time(self):
+        """Peek at the next valid wake time, discarding stale heap entries."""
+        while self.sleeping:
+            wake_time, _, task = self.sleeping[0]
+            if self.search(task.getID()) == -1 or task.done or task._blocked_reason != "sleep":
+                heapq.heappop(self.sleeping)
+                continue
+            return wake_time
+        return None
 
     def list(self):
-        '''
-        @function list() - returns a list of all of the tasks
-            in the OSlist.
-        '''
+        """Return a snapshot list of currently registered tasks."""
         return [task for task in self.tasks]
 
-
-    def moveToSleepList(self,sleep_task):
-        
-        #Remove From the priority category list 
-        #but keep in the pid list  for searching
-        removeNode(sleep_task)
-        priority = sleep_task.priority
-
-
-        if not (sleep_task and self.cats[priority]): return
-        if self.cats[priority].getID() == sleep_task.getID():
-            self.cats[priority] = self.cats[priority].next
-
-        #Clear the active tasks from the memory
-        sleep_task.next = None
-        sleep_task.prev = None
-
-        #Add to sleep list
-        if self.sleepList == None:
-            self.sleepList = sleep_task
-        else:
-            insertNext(self.sleepList, sleep_task)
-        return
-
-
-    def notifyWake(self,woken_task):
-
-        priority = woken_task.priority
-
-        #Determine if it is the head of Sleep list
-        if self.sleepList.getID() == woken_task.getID():
-
-            if woken_task.next != None:
-                self.sleepList = self.sleepList.next 
-            else:
-                self.sleepList = None
-        
-        removeNode(woken_task)
-        woken_task.prev = None
-        woken_task.next = None
-
-        if self.cats[priority] == None:
-            self.cats[priority] = woken_task
-        else:
-            insertNext(self.cats[priority],woken_task)
-
-        return self.setCatSel(priority)
-
-
     def isOnlyWatchers(self):
-        '''
-        @function isOnlyWatchers - Determines if all of the tasks in the OSlist 
-            are watcher tasks. 
-        @return True - Bool() - if all tasks are watchers. Otherwise False.
-        '''
-        numTasks = len(self.tasks)
-
-        if numTasks == self.numWatchers:
-            return True
-        return False
-
+        """Report whether every remaining task is marked as a watcher."""
+        return len(self.tasks) == self.numWatchers
 
     def __len__(self):
-        '''
-        @function __len__() - returns the number of tasks 
-            within the OSlist().
-        '''
+        """Return the number of registered tasks."""
         return len(self.tasks)
 
-
     def __str__(self):
-        '''
-        @function __str__() - return the string representation 
-            of all the tasks within the OSlist()
-        '''
-        return '\n'.join([str(x) for x in self.tasks])
-
-
-
-
-
-# if __name__ == '__main__':
-
-#     tasks = OSList(10)
-
-#     secs = time.time()
-#     # for x in range(2**6):
-#     #     tasks.insert(smallTask(x % 10,None,1, name=str(x)))
-#     pid1 = tasks.insert(smallTask(1,None, name=str(1)))
-#     pid2 = tasks.insert(smallTask(2,None, name=str(2)))
-#     pid3 = tasks.insert(smallTask(3,None, name=str(3)))
-#     pid4 = tasks.insert(smallTask(4,None, name=str(4)))
-#     pid5 = tasks.insert(smallTask(5,None, name=str(5)))
-
-   
-#     print([x.priority for x in tasks.cats[0:4]])
-#     cursor = tasks.pop()
-#     while cursor != None:
-#         cursor.isReady = 0
-#         print(cursor.name, cursor.getID(), cursor.priority)
-#         cursor = tasks.pop()
-
-#     print(len(tasks))
-
-
-
+        """Return a newline-separated dump of all known tasks."""
+        return "\n".join([str(x) for x in self.tasks])
