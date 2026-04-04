@@ -4,6 +4,7 @@ import unittest
 sys.path.append("..")
 
 from SmallPackage.Kernel import Kernel
+from SmallPackage.clients import SmallHTTPClient
 from SmallPackage.clients import SmallMQTTClient
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.clients import SmallRedisClient
@@ -25,6 +26,7 @@ class ScriptedKernel(Kernel):
         self.output = []
         self.sockets = list(sockets)
         self.opened = []
+        self.tls_wrap_calls = []
 
     def write(self, msg):
         self.output.append(msg)
@@ -89,6 +91,27 @@ class ScriptedKernel(Kernel):
     def socket_close(self, sock):
         sock.closed = True
 
+    def socket_wrap_tls_client(
+        self,
+        sock,
+        server_hostname=None,
+        tls_ca_file=None,
+        tls_cert_file=None,
+        tls_key_file=None,
+        tls_verify=True,
+    ):
+        self.tls_wrap_calls.append(
+            {
+                "sock": sock,
+                "server_hostname": server_hostname,
+                "tls_ca_file": tls_ca_file,
+                "tls_cert_file": tls_cert_file,
+                "tls_key_file": tls_key_file,
+                "tls_verify": tls_verify,
+            }
+        )
+        return sock
+
 
 class TestProtocolClients(unittest.TestCase):
     def build_os(self, socket, task):
@@ -130,6 +153,155 @@ class TestProtocolClients(unittest.TestCase):
             redis_socket.sent,
         )
         self.assertIs(kernel.opened[0], redis_socket)
+
+    def test_http_client_supports_get_with_base_url_params_and_tls(self):
+        http_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 200 OK\r\n",
+                b"Content-Type: application/json\r\n",
+                b"Content-Length: 12\r\n",
+                b"\r\n",
+                b"{\"ok\": true}",
+            ]
+        )
+
+        async def http_job(task):
+            client = SmallHTTPClient(
+                task,
+                base_url="https://api.example.com:8443/v1",
+                default_headers={"Accept": "application/json"},
+                tls_ca_file="tests/fixtures/ca.pem",
+                tls_verify=False,
+            )
+            response = await client.get("status", params={"check": 1, "verbose": True}, headers={"X-Test": "1"})
+            return (response.status_code, response.json()["ok"], response.ok)
+
+        root = SmallTask(2, http_job, name="http_get_job")
+        _, kernel = self.build_os(http_socket, root)
+
+        self.assertEqual((200, True, True), root.result)
+        self.assertTrue(http_socket.closed)
+        self.assertEqual(
+            [
+                {
+                    "sock": http_socket,
+                    "server_hostname": "api.example.com",
+                    "tls_ca_file": "tests/fixtures/ca.pem",
+                    "tls_cert_file": None,
+                    "tls_key_file": None,
+                    "tls_verify": False,
+                }
+            ],
+            kernel.tls_wrap_calls,
+        )
+        self.assertEqual(
+            [
+                (
+                    b"GET /v1/status?check=1&verbose=true HTTP/1.1\r\n"
+                    b"Accept: application/json\r\n"
+                    b"X-Test: 1\r\n"
+                    b"Host: api.example.com:8443\r\n"
+                    b"User-Agent: smallOS/0.1\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                )
+            ],
+            http_socket.sent,
+        )
+
+    def test_http_client_supports_post_json_and_chunked_response(self):
+        http_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 201 Created\r\n",
+                b"Transfer-Encoding: chunked\r\n",
+                b"Content-Type: application/json; charset=utf-8\r\n",
+                b"\r\n",
+                b"B\r\n",
+                b"{\"id\": 123}\r\n",
+                b"0\r\n",
+                b"\r\n",
+            ]
+        )
+
+        async def http_job(task):
+            client = SmallHTTPClient(task, host="api.example.com", port=8080)
+            response = await client.post(
+                "/items",
+                headers={"Accept": "application/json"},
+                json_body={"name": "smallos"},
+            )
+            return (response.status_code, response.reason, response.json()["id"], response.text())
+
+        root = SmallTask(2, http_job, name="http_post_job")
+        self.build_os(http_socket, root)
+
+        self.assertEqual((201, "Created", 123, '{"id": 123}'), root.result)
+        self.assertTrue(http_socket.closed)
+        self.assertEqual(
+            [
+                (
+                    b"POST /items HTTP/1.1\r\n"
+                    b"Accept: application/json\r\n"
+                    b"Content-Type: application/json\r\n"
+                    b"Host: api.example.com:8080\r\n"
+                    b"User-Agent: smallOS/0.1\r\n"
+                    b"Connection: close\r\n"
+                    b"Content-Length: 18\r\n"
+                    b"\r\n"
+                    b"{\"name\":\"smallos\"}"
+                )
+            ],
+            http_socket.sent,
+        )
+
+    def test_redis_client_supports_auth_and_tls_options(self):
+        redis_socket = ScriptedSocket(
+            [
+                b"+OK\r\n",
+                b"+PONG\r\n",
+            ]
+        )
+
+        async def redis_job(task):
+            client = SmallRedisClient(
+                task,
+                host="redis.local",
+                use_tls=True,
+                server_hostname="redis.local",
+                tls_ca_file="tests/fixtures/ca.pem",
+                tls_verify=False,
+                username="smallos",
+                password="testpassword",
+            )
+            await client.connect()
+            pong = await client.ping()
+            client.close()
+            return pong
+
+        root = SmallTask(2, redis_job, name="redis_auth_tls_job")
+        _, kernel = self.build_os(redis_socket, root)
+
+        self.assertEqual("PONG", root.result)
+        self.assertEqual(
+            [
+                {
+                    "sock": redis_socket,
+                    "server_hostname": "redis.local",
+                    "tls_ca_file": "tests/fixtures/ca.pem",
+                    "tls_cert_file": None,
+                    "tls_key_file": None,
+                    "tls_verify": False,
+                }
+            ],
+            kernel.tls_wrap_calls,
+        )
+        self.assertEqual(
+            [
+                b"*3\r\n$4\r\nAUTH\r\n$7\r\nsmallos\r\n$12\r\ntestpassword\r\n",
+                b"*1\r\n$4\r\nPING\r\n",
+            ],
+            redis_socket.sent,
+        )
 
     def test_mqtt_client_supports_connect_subscribe_receive_and_publish(self):
         mqtt_socket = ScriptedSocket(
@@ -188,6 +360,53 @@ class TestProtocolClients(unittest.TestCase):
             [
                 b"\x10\x17\x00\x04MQTT\x04\x02\x00<\x00\x0bdemo-client",
                 b"\x32\x0A\x00\x04demo\x00\x01ok",
+                b"\xE0\x00",
+            ],
+            mqtt_socket.sent,
+        )
+
+    def test_mqtt_client_supports_auth_and_tls_options(self):
+        mqtt_socket = ScriptedSocket(
+            [
+                b"\x20\x02\x00\x00",
+            ]
+        )
+
+        async def mqtt_job(task):
+            client = SmallMQTTClient(
+                task,
+                host="broker.local",
+                client_id="demo-client",
+                use_tls=True,
+                server_hostname="broker.local",
+                tls_ca_file="tests/fixtures/ca.pem",
+                username="smallos",
+                password="testpassword",
+            )
+            await client.connect()
+            await client.disconnect()
+            return "connected"
+
+        root = SmallTask(2, mqtt_job, name="mqtt_auth_tls_connect")
+        _, kernel = self.build_os(mqtt_socket, root)
+
+        self.assertEqual("connected", root.result)
+        self.assertEqual(
+            [
+                {
+                    "sock": mqtt_socket,
+                    "server_hostname": "broker.local",
+                    "tls_ca_file": "tests/fixtures/ca.pem",
+                    "tls_cert_file": None,
+                    "tls_key_file": None,
+                    "tls_verify": True,
+                }
+            ],
+            kernel.tls_wrap_calls,
+        )
+        self.assertEqual(
+            [
+                b"\x10.\x00\x04MQTT\x04\xc2\x00<\x00\x0bdemo-client\x00\x07smallos\x00\x0ctestpassword",
                 b"\xE0\x00",
             ],
             mqtt_socket.sent,

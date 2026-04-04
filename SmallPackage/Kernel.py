@@ -35,6 +35,61 @@ def _import_first(*module_names):
 	return None
 
 
+def _portable_shell_split(line):
+	"""
+	Tokenize one shell command line without relying on desktop-only helpers.
+
+	This parser is intentionally small but still handles the common cases a
+	MicroPython-facing shell needs:
+	- whitespace-separated tokens
+	- single or double quoted strings
+	- backslash escaping for the next character
+	"""
+	tokens = []
+	current = []
+	quote = None
+	escape = False
+
+	for char in line:
+		if escape:
+			current.append(char)
+			escape = False
+			continue
+
+		if char == "\\":
+			escape = True
+			continue
+
+		if quote is not None:
+			if char == quote:
+				quote = None
+			else:
+				current.append(char)
+			continue
+
+		if char in ("'", '"'):
+			quote = char
+			continue
+
+		if char.isspace():
+			if current:
+				tokens.append("".join(current))
+				current = []
+			continue
+
+		current.append(char)
+
+	if escape:
+		current.append("\\")
+
+	if quote is not None:
+		raise ValueError("unterminated quoted string")
+
+	if current:
+		tokens.append("".join(current))
+	return tokens
+
+
 def detect_micropython_machine_name(sys_mod=None, os_mod=None):
 	"""
 	Best-effort lookup of the active board/firmware machine name.
@@ -109,6 +164,16 @@ class Kernel:
 	def write(self, msg):
 		pass
 
+	def shell_split(self, line):
+		"""
+		Tokenize one shell command line.
+
+		The base implementation uses a small portable parser so shells can work on
+		platforms where ``shlex`` is unavailable. Desktop kernels may override
+		this with richer parsing behavior.
+		"""
+		return _portable_shell_split(line)
+
 	def time_epoch(self):
 		pass
 
@@ -177,7 +242,15 @@ class Kernel:
 	def socket_close(self, sock):
 		return
 
-	def socket_wrap_tls_client(self, sock, server_hostname=None):
+	def socket_wrap_tls_client(
+		self,
+		sock,
+		server_hostname=None,
+		tls_ca_file=None,
+		tls_cert_file=None,
+		tls_key_file=None,
+		tls_verify=True,
+	):
 		return sock
 
 	def socket_do_handshake(self, sock):
@@ -225,6 +298,7 @@ class Unix(Kernel):
 	def __init__(self):
 		super().__init__()
 		import errno
+		import shlex
 		import select
 		import socket
 		import ssl
@@ -232,6 +306,7 @@ class Unix(Kernel):
 		import time
 
 		self._errno = errno
+		self._shlex = shlex
 		self._select = select
 		self._socket = socket
 		self._ssl = ssl
@@ -244,6 +319,10 @@ class Unix(Kernel):
 		self._sys.stdout.write(msg)
 		self._sys.stdout.flush()
 		return
+
+	def shell_split(self, line):
+		"""Use ``shlex`` on Unix for richer desktop-style shell parsing."""
+		return self._shlex.split(line)
 
 	def time_epoch(self):
 		return self._time.time()
@@ -342,8 +421,23 @@ class Unix(Kernel):
 		sock.close()
 		return
 
-	def socket_wrap_tls_client(self, sock, server_hostname=None):
-		context = self._ssl.create_default_context()
+	def socket_wrap_tls_client(
+		self,
+		sock,
+		server_hostname=None,
+		tls_ca_file=None,
+		tls_cert_file=None,
+		tls_key_file=None,
+		tls_verify=True,
+	):
+		if tls_verify:
+			context = self._ssl.create_default_context(cafile=tls_ca_file)
+		else:
+			context = self._ssl._create_unverified_context()
+			context.check_hostname = False
+			context.verify_mode = self._ssl.CERT_NONE
+		if tls_cert_file is not None:
+			context.load_cert_chain(certfile=tls_cert_file, keyfile=tls_key_file)
 		wrapped = context.wrap_socket(
 			sock,
 			server_hostname=server_hostname,
@@ -511,16 +605,43 @@ class MicroPythonKernel(Kernel):
 		sock.close()
 		return
 
-	def socket_wrap_tls_client(self, sock, server_hostname=None):
+	def socket_wrap_tls_client(
+		self,
+		sock,
+		server_hostname=None,
+		tls_ca_file=None,
+		tls_cert_file=None,
+		tls_key_file=None,
+		tls_verify=True,
+	):
 		if not self._ssl:
 			raise NotImplementedError('TLS support is not available on this MicroPython port.')
+
+		attempts = []
+		kwargs = {}
 		if server_hostname is not None:
+			kwargs['server_hostname'] = server_hostname
+		if tls_cert_file is not None:
+			kwargs['cert'] = tls_cert_file
+		if tls_key_file is not None:
+			kwargs['key'] = tls_key_file
+		if not tls_verify and hasattr(self._ssl, 'CERT_NONE'):
+			kwargs['cert_reqs'] = self._ssl.CERT_NONE
+		if kwargs:
+			attempts.append(kwargs)
+		if 'cert' in kwargs or 'key' in kwargs or 'cert_reqs' in kwargs:
+			attempts.append({k: v for k, v in kwargs.items() if k == 'server_hostname'})
+		attempts.append({})
+
+		last_error = None
+		for wrap_kwargs in attempts:
 			try:
-				wrapped = self._ssl.wrap_socket(sock, server_hostname=server_hostname)
-			except TypeError:
-				wrapped = self._ssl.wrap_socket(sock)
+				wrapped = self._ssl.wrap_socket(sock, **wrap_kwargs)
+				break
+			except TypeError as exc:
+				last_error = exc
 		else:
-			wrapped = self._ssl.wrap_socket(sock)
+			raise last_error
 		if hasattr(wrapped, 'setblocking'):
 			wrapped.setblocking(False)
 		return wrapped

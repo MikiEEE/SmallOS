@@ -22,6 +22,7 @@ class SmallRedisClient:
     - generic command execution
     - common helpers like ``ping``, ``get``, ``set``, and ``delete``
     - pub/sub helpers for lightweight message flows
+    - optional TLS with custom CA/client certificate paths on Unix targets
     """
 
     def __init__(
@@ -31,6 +32,10 @@ class SmallRedisClient:
         port=6379,
         use_tls=False,
         server_hostname=None,
+        tls_ca_file=None,
+        tls_cert_file=None,
+        tls_key_file=None,
+        tls_verify=True,
         username=None,
         password=None,
         db=None,
@@ -47,6 +52,10 @@ class SmallRedisClient:
             port=port,
             use_tls=use_tls,
             server_hostname=server_hostname,
+            tls_ca_file=tls_ca_file,
+            tls_cert_file=tls_cert_file,
+            tls_key_file=tls_key_file,
+            tls_verify=tls_verify,
         )
 
     @staticmethod

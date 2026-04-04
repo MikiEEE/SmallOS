@@ -18,7 +18,7 @@ The project is currently experimental but usable. The runtime core supports:
 - time-based sleeping
 - readiness-based socket/I/O waiting
 - generic TCP/TLS kernel hooks for higher-level protocols
-- smallOS-native Redis and MQTT helper clients
+- smallOS-native HTTP, Redis, and MQTT helper clients
 
 ## Why smallOS?
 
@@ -41,8 +41,14 @@ That makes it a good fit for:
   task lifecycle, coroutine stepping, join bookkeeping
 - [SmallPackage/Kernel.py](SmallPackage/Kernel.py):
   desktop and MicroPython kernel abstractions
+- [SmallPackage/SmallIO.py](SmallPackage/SmallIO.py):
+  buffered app/shell output routing and terminal-mode helpers
 - [SmallPackage/clients](SmallPackage/clients):
   protocol client package for cooperative network integrations
+- [SmallPackage/clients/README.md](SmallPackage/clients/README.md):
+  detailed client-specific guide and API notes
+- [SmallPackage/clients/SmallHTTP.py](SmallPackage/clients/SmallHTTP.py):
+  dependency-free HTTP client for smallOS tasks
 - [SmallPackage/clients/SmallStream.py](SmallPackage/clients/SmallStream.py):
   cooperative socket stream helper for protocol clients
 - [SmallPackage/clients/SmallRedis.py](SmallPackage/clients/SmallRedis.py):
@@ -53,6 +59,8 @@ That makes it a good fit for:
   runtime configuration loader/container
 - [smallos.config.json](smallos.config.json):
   repo-level runtime defaults
+- [shells.py](shells.py):
+  command shell helpers for runtime inspection and demos
 - [demos](demos):
   desktop and board-specific demo entry points
 - [tests](tests):
@@ -156,14 +164,20 @@ The new demos live in [demos](demos):
   Pico W oriented startup and Wi-Fi configuration example
 - [demos/micropython_autodetect_demo.py](demos/micropython_autodetect_demo.py):
   automatic MicroPython kernel selection
+- [demos/runtime_demo.py](demos/runtime_demo.py):
+  migrated home for the original root-level runtime showcase
+- [demos/shell_demo.py](demos/shell_demo.py):
+  scripted shell session running alongside other cooperative tasks
 - [demos/redis_demo.py](demos/redis_demo.py):
   Redis example built on the native cooperative client
+- [demos/http_demo.py](demos/http_demo.py):
+  HTTP example built on the native cooperative client
 - [demos/mqtt_demo.py](demos/mqtt_demo.py):
   MQTT example built on the native cooperative client
 
 The original root demo remains available in
-[demo.py](demo.py) and now uses the same config file
-path as the rest of the project.
+[demo.py](demo.py) as a compatibility wrapper around
+[demos/runtime_demo.py](demos/runtime_demo.py).
 
 ## Runtime Model
 
@@ -191,63 +205,32 @@ The kernel layer is deliberately generic. Protocol clients such as HTTPS,
 Redis, MQTT, RabbitMQ/AMQP, and Kafka should be built on top of the shared
 TCP/TLS socket surface rather than requiring protocol-specific kernel methods.
 
-## Redis and MQTT
+## Clients
 
-The current setup now includes first-party smallOS-native helpers for Redis and
-MQTT, so users can stay inside the smallOS scheduler instead of dropping down
-to raw sockets or depending on `asyncio`-owned clients.
+The current setup now includes first-party smallOS-native helpers for HTTP,
+Redis, and MQTT, so users can stay inside the smallOS scheduler instead of
+dropping down to raw sockets or depending on `asyncio`-owned clients.
 
 Available helpers:
+- `SmallHTTPClient`
 - `SmallRedisClient`
 - `SmallMQTTClient`
 
-Redis example:
-
-```python
-from SmallPackage import SmallOS, SmallRedisClient, SmallTask, Unix
-
-
-async def redis_job(task):
-    client = SmallRedisClient(task, host="127.0.0.1", port=6379)
-    await client.connect()
-    await client.set("smallos:key", "hello")
-    value = await client.get("smallos:key")
-    task.OS.print("redis value: {}\n".format(value))
-    client.close()
-
-
-runtime = SmallOS().setKernel(Unix())
-runtime.fork([SmallTask(2, redis_job, name="redis_job")])
-runtime.startOS()
-```
-
-MQTT example:
-
-```python
-from SmallPackage import SmallMQTTClient, SmallOS, SmallTask, Unix
-
-
-async def mqtt_job(task):
-    client = SmallMQTTClient(task, host="127.0.0.1", port=1883, client_id="smallos-demo")
-    await client.connect()
-    await client.subscribe("smallos/demo", qos=1)
-    await client.publish("smallos/demo", "hello from smallOS", qos=1)
-    message = await client.receive_message()
-    task.OS.print("{} -> {}\n".format(message["topic"], message["payload"]))
-    await client.disconnect()
-
-
-runtime = SmallOS().setKernel(Unix())
-runtime.fork([SmallTask(2, mqtt_job, name="mqtt_job")])
-runtime.startOS()
-```
-
 Current scope:
+- HTTP: request/response helper with query params, JSON bodies, TLS, and
+  chunked/content-length response parsing
 - Redis: RESP command execution plus helpers like `ping`, `get`, `set`,
   `delete`, `publish`, and `subscribe`
 - MQTT: MQTT 3.1.1 connect/disconnect, publish at QoS 0/1/2, subscribe at
   QoS 0/1/2, and inbound message receive with PUBACK/PUBREC/PUBREL/PUBCOMP
   handling as required by the protocol
+- Both clients: optional username/password auth and TLS transport setup, with
+  Unix support for custom CA and client certificate paths through
+  `tls_ca_file`, `tls_cert_file`, and `tls_key_file`
+
+For detailed examples, constructor options, response helpers, and transport
+notes, see
+[SmallPackage/clients/README.md](SmallPackage/clients/README.md).
 
 ## Contributing
 

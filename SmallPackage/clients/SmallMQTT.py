@@ -48,6 +48,7 @@ class SmallMQTTClient:
     - publish with QoS 0, 1, or 2
     - subscribe at QoS 0, 1, or 2
     - inbound message receive with the required QoS acknowledgements
+    - optional username/password auth and TLS on transports that support it
     """
 
     def __init__(
@@ -58,6 +59,10 @@ class SmallMQTTClient:
         client_id="smallos-client",
         use_tls=False,
         server_hostname=None,
+        tls_ca_file=None,
+        tls_cert_file=None,
+        tls_key_file=None,
+        tls_verify=True,
         username=None,
         password=None,
         keepalive=60,
@@ -80,6 +85,10 @@ class SmallMQTTClient:
             port=port or (8883 if use_tls else 1883),
             use_tls=use_tls,
             server_hostname=server_hostname,
+            tls_ca_file=tls_ca_file,
+            tls_cert_file=tls_cert_file,
+            tls_key_file=tls_key_file,
+            tls_verify=tls_verify,
         )
 
     def _next_packet_id(self):
