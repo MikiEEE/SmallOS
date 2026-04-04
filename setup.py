@@ -21,7 +21,6 @@ setup(
     package_data={"SmallPackage.clients": ["README.md"]},
     install_requires=[],
     author="Michael E",
-    author_email="mikemp1997@gmail.com",
     description="Concurrent and Priority oriented Task Management System",
     long_description=README.read_text(encoding="utf-8"),
     long_description_content_type="text/markdown",
