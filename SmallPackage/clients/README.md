@@ -39,6 +39,11 @@ That means every client here inherits the same benefits:
 - the scheduler can keep running higher-priority work
 - no background threads are required
 
+All of the clients also honor `SmallOSConfig.client_defaults` when they are
+constructed from an attached task. That lets you set project-wide defaults for
+things like stream buffer limits, HTTP response caps, Redis parser limits, and
+MQTT keepalive / packet limits in one place.
+
 ## Available Clients
 
 ### SmallStream
@@ -67,6 +72,7 @@ TLS knobs:
 - `tls_cert_file`
 - `tls_key_file`
 - `tls_verify`
+- `max_buffer_size`
 
 ## SmallHTTPClient
 
@@ -125,6 +131,8 @@ Constructor options:
 - `tls_cert_file`
 - `tls_key_file`
 - `tls_verify`
+- `max_response_size`
+- `max_buffer_size`
 
 Common request methods:
 - `await client.get(path="", headers=None, params=None)`
@@ -203,6 +211,11 @@ Useful methods:
 - `await client.read_pubsub_event()`
 - `client.close()`
 
+Constructor tuning:
+- `max_response_size`
+- `max_nesting_depth`
+- `max_buffer_size`
+
 ## SmallMQTTClient
 
 File:
@@ -252,6 +265,12 @@ Useful methods:
 - `await client.publish(topic, payload, qos=0, retain=False)`
 - `await client.subscribe(topic, qos=0)`
 - `await client.receive_message()`
+
+Constructor tuning:
+- `keepalive`
+- `max_packet_size`
+- `max_queued_messages`
+- `max_buffer_size`
 
 ## TLS and Auth Notes
 

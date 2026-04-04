@@ -6,7 +6,20 @@ workflow: connect to a broker, publish messages at QoS 0/1/2, subscribe, and
 receive messages cooperatively without threads or ``asyncio``.
 """
 
+import warnings
+
+from ._client_config import MISSING, resolve_client_setting
 from .SmallStream import SmallStream
+
+
+def _random_client_suffix(length=8):
+    """Generate a short hex suffix for the default MQTT client id."""
+    try:
+        import os
+        return os.urandom(length // 2).hex()
+    except Exception:
+        import time
+        return "{:08x}".format(int(time.time() * 1000) & 0xFFFFFFFF)
 
 
 class MQTTProtocolError(Exception):
@@ -56,7 +69,7 @@ class SmallMQTTClient:
         task,
         host,
         port=None,
-        client_id="smallos-client",
+        client_id=None,
         use_tls=False,
         server_hostname=None,
         tls_ca_file=None,
@@ -65,30 +78,72 @@ class SmallMQTTClient:
         tls_verify=True,
         username=None,
         password=None,
-        keepalive=60,
+        keepalive=MISSING,
         clean_session=True,
         decode_responses=True,
+        max_packet_size=MISSING,
+        max_queued_messages=MISSING,
+        max_buffer_size=MISSING,
     ):
+        if client_id is None:
+            client_id = "smallos-" + _random_client_suffix()
         self.task = task
         self.client_id = client_id
         self.username = username
         self.password = password
-        self.keepalive = keepalive
+        self.keepalive = resolve_client_setting(
+            task,
+            "mqtt",
+            "keepalive",
+            keepalive,
+            60,
+        )
         self.clean_session = clean_session
         self.decode_responses = decode_responses
+        self.max_packet_size = resolve_client_setting(
+            task,
+            "mqtt",
+            "max_packet_size",
+            max_packet_size,
+            256 * 1024,
+        )
+        self.max_queued_messages = resolve_client_setting(
+            task,
+            "mqtt",
+            "max_queued_messages",
+            max_queued_messages,
+            1024,
+        )
+        self.max_buffer_size = resolve_client_setting(
+            task,
+            "mqtt",
+            "max_buffer_size",
+            max_buffer_size,
+            16 * 1024 * 1024,
+        )
         self._packet_id = 0
         self._message_queue = []
         self._pending_incoming_qos2 = {}
+
+        effective_tls = use_tls
+        if (username is not None or password is not None) and not use_tls:
+            warnings.warn(
+                "MQTT credentials are being sent without TLS. "
+                "Set use_tls=True to encrypt the connection.",
+                stacklevel=2,
+            )
+
         self.stream = SmallStream(
             task,
             host=host,
-            port=port or (8883 if use_tls else 1883),
-            use_tls=use_tls,
+            port=port or (8883 if effective_tls else 1883),
+            use_tls=effective_tls,
             server_hostname=server_hostname,
             tls_ca_file=tls_ca_file,
             tls_cert_file=tls_cert_file,
             tls_key_file=tls_key_file,
             tls_verify=tls_verify,
+            max_buffer_size=self.max_buffer_size,
         )
 
     def _next_packet_id(self):
@@ -101,6 +156,16 @@ class SmallMQTTClient:
         if not self.decode_responses:
             return data
         return data.decode("utf-8", errors="replace")
+
+    def _enqueue_message(self, message):
+        """Append a message to the internal queue, enforcing the size limit."""
+        if self.max_queued_messages and len(self._message_queue) >= self.max_queued_messages:
+            raise MQTTProtocolError(
+                "Inbound message queue exceeded max_queued_messages ({}).".format(
+                    self.max_queued_messages
+                )
+            )
+        self._message_queue.append(message)
 
     @staticmethod
     def _packet_id_bytes(packet_id):
@@ -138,7 +203,7 @@ class SmallMQTTClient:
 
             message = await self._handle_incoming_packet(packet_type, flags, payload)
             if message is not None:
-                self._message_queue.append(message)
+                self._enqueue_message(message)
 
     async def connect(self):
         """Open the transport and complete the MQTT CONNECT handshake."""
@@ -188,7 +253,7 @@ class SmallMQTTClient:
                 return payload
             message = await self._handle_incoming_packet(packet_type, flags, payload)
             if message is not None:
-                self._message_queue.append(message)
+                self._enqueue_message(message)
 
     async def publish(self, topic, payload, qos=0, retain=False):
         """Publish one message at QoS 0, 1, or 2."""
@@ -246,7 +311,7 @@ class SmallMQTTClient:
                 return {"topic": topic, "granted_qos": granted_qos, "packet_id": packet_id}
             message = await self._handle_incoming_packet(packet_type, flags, packet_payload)
             if message is not None:
-                self._message_queue.append(message)
+                self._enqueue_message(message)
 
     async def receive_message(self):
         """Return the next inbound MQTT publish event."""
@@ -276,6 +341,13 @@ class SmallMQTTClient:
             multiplier *= 128
             if multiplier > 128**4:
                 raise MQTTProtocolError("Malformed MQTT remaining length field.")
+
+        if self.max_packet_size and remaining_length > self.max_packet_size:
+            raise MQTTProtocolError(
+                "MQTT packet payload of {} bytes exceeds max_packet_size ({}).".format(
+                    remaining_length, self.max_packet_size
+                )
+            )
 
         payload = await self.stream.read_exactly(remaining_length)
         return packet_type, flags, payload
@@ -319,6 +391,12 @@ class SmallMQTTClient:
         if message["qos"] == 2 and message["packet_id"] is not None:
             packet_id = message["packet_id"]
             if packet_id not in self._pending_incoming_qos2:
+                if self.max_queued_messages and len(self._pending_incoming_qos2) >= self.max_queued_messages:
+                    raise MQTTProtocolError(
+                        "Pending QoS 2 messages exceeded max_queued_messages ({}).".format(
+                            self.max_queued_messages
+                        )
+                    )
                 # QoS 2 delivery is completed only after PUBREL, so we stage
                 # the message here and release it when the broker confirms.
                 self._pending_incoming_qos2[packet_id] = message

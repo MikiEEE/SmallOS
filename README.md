@@ -115,6 +115,7 @@ Current config fields:
 - `priority_levels`: number of ready-queue categories
 - `io_buffer_length`: buffered app output length when the terminal view is hidden
 - `eternal_watchers`: keep the runtime alive when only watcher tasks remain
+- `client_defaults`: shared defaults for cooperative clients and streams
 
 Example:
 
@@ -123,13 +124,34 @@ Example:
   "task_capacity": 1024,
   "priority_levels": 10,
   "io_buffer_length": 1024,
-  "eternal_watchers": false
+  "eternal_watchers": false,
+  "client_defaults": {
+    "stream": {
+      "max_buffer_size": 16777216
+    },
+    "http": {
+      "max_response_size": 16777216
+    },
+    "redis": {
+      "max_response_size": 16777216,
+      "max_nesting_depth": 32
+    },
+    "mqtt": {
+      "keepalive": 60,
+      "max_packet_size": 262144,
+      "max_queued_messages": 1024
+    }
+  }
 }
 ```
 
 The config loader also accepts the aliases `oslist_length` and
 `num_categories` so older notes and experiments can map cleanly onto the
 current runtime.
+
+Client constructors still accept explicit overrides, but when you create them
+inside a task they now inherit these defaults from `task.OS.config` unless you
+pass a value directly.
 
 ## Kernels and Board Profiles
 

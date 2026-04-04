@@ -4,10 +4,12 @@ import unittest
 sys.path.append("..")
 
 from SmallPackage.Kernel import Kernel
-from SmallPackage.clients import SmallHTTPClient
+from SmallPackage.clients import HTTPProtocolError, SmallHTTPClient
 from SmallPackage.clients import SmallMQTTClient
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.clients import SmallRedisClient
+from SmallPackage.clients.SmallMQTT import MQTTProtocolError
+from SmallPackage.clients.SmallRedis import RedisError
 from SmallPackage.SmallTask import SmallTask
 
 
@@ -114,9 +116,9 @@ class ScriptedKernel(Kernel):
 
 
 class TestProtocolClients(unittest.TestCase):
-    def build_os(self, socket, task):
+    def build_os(self, socket, task, config=None):
         kernel = ScriptedKernel([socket])
-        runtime = SmallOS().setKernel(kernel)
+        runtime = SmallOS(config=config).setKernel(kernel)
         runtime.fork([task])
         runtime.startOS()
         return runtime, kernel
@@ -254,6 +256,69 @@ class TestProtocolClients(unittest.TestCase):
             http_socket.sent,
         )
 
+    def test_http_client_inherits_limits_from_runtime_config(self):
+        http_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 200 OK\r\n",
+                b"Content-Length: 12\r\n",
+                b"\r\n",
+                b"{\"ok\": true}",
+            ]
+        )
+
+        async def http_job(task):
+            client = SmallHTTPClient(task, host="api.example.com")
+            return await client.get("/")
+
+        root = SmallTask(2, http_job, name="http_config_limits")
+        self.build_os(
+            http_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "http": {"max_response_size": 4},
+                }
+            },
+        )
+
+        self.assertIsInstance(root.exception, HTTPProtocolError)
+        self.assertIn("max_response_size", str(root.exception))
+
+    def test_explicit_client_arguments_override_runtime_config(self):
+        http_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 200 OK\r\n",
+                b"Content-Length: 12\r\n",
+                b"\r\n",
+                b"{\"ok\": true}",
+            ]
+        )
+
+        async def http_job(task):
+            client = SmallHTTPClient(
+                task,
+                host="api.example.com",
+                max_response_size=32,
+                max_buffer_size=128,
+            )
+            response = await client.get("/")
+            return response.json()["ok"]
+
+        root = SmallTask(2, http_job, name="http_override_limits")
+        self.build_os(
+            http_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "stream": {"max_buffer_size": 4},
+                    "http": {"max_response_size": 4},
+                }
+            },
+        )
+
+        self.assertTrue(root.result)
+        self.assertIsNone(root.exception)
+
     def test_redis_client_supports_auth_and_tls_options(self):
         redis_socket = ScriptedSocket(
             [
@@ -302,6 +367,31 @@ class TestProtocolClients(unittest.TestCase):
             ],
             redis_socket.sent,
         )
+
+    def test_redis_client_inherits_limits_from_runtime_config(self):
+        redis_socket = ScriptedSocket(
+            [
+                b"$6\r\nvalue!\r\n",
+            ]
+        )
+
+        async def redis_job(task):
+            client = SmallRedisClient(task, host="redis.local")
+            return await client.get("key")
+
+        root = SmallTask(2, redis_job, name="redis_config_limits")
+        self.build_os(
+            redis_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "redis": {"max_response_size": 4},
+                }
+            },
+        )
+
+        self.assertIsInstance(root.exception, RedisError)
+        self.assertIn("max_response_size", str(root.exception))
 
     def test_mqtt_client_supports_connect_subscribe_receive_and_publish(self):
         mqtt_socket = ScriptedSocket(
@@ -482,6 +572,40 @@ class TestProtocolClients(unittest.TestCase):
             ],
             mqtt_socket.sent,
         )
+
+    def test_mqtt_client_inherits_keepalive_and_packet_limits_from_runtime_config(self):
+        mqtt_socket = ScriptedSocket(
+            [
+                b"\x20\x02\x00\x00",
+                b"\x30\x08\x00\x04demohi",
+            ]
+        )
+
+        async def mqtt_job(task):
+            client = SmallMQTTClient(task, host="broker.local", client_id="demo-client")
+            await client.connect()
+            return await client.receive_message()
+
+        root = SmallTask(2, mqtt_job, name="mqtt_config_limits")
+        self.build_os(
+            mqtt_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "mqtt": {
+                        "keepalive": 7,
+                        "max_packet_size": 4,
+                    }
+                }
+            },
+        )
+
+        self.assertEqual(
+            b"\x10\x17\x00\x04MQTT\x04\x02\x00\x07\x00\x0bdemo-client",
+            mqtt_socket.sent[0],
+        )
+        self.assertIsInstance(root.exception, MQTTProtocolError)
+        self.assertIn("max_packet_size", str(root.exception))
 
 
 if __name__ == "__main__":

@@ -6,6 +6,9 @@ module gives smallOS tasks a simple, dependency-free way to speak Redis over
 the runtime's cooperative socket layer on both Unix and MicroPython targets.
 """
 
+import warnings
+
+from ._client_config import MISSING, resolve_client_setting
 from .SmallStream import SmallStream
 
 
@@ -40,12 +43,44 @@ class SmallRedisClient:
         password=None,
         db=None,
         decode_responses=True,
+        max_response_size=MISSING,
+        max_nesting_depth=MISSING,
+        max_buffer_size=MISSING,
     ):
         self.task = task
         self.username = username
         self.password = password
         self.db = db
         self.decode_responses = decode_responses
+        self.max_response_size = resolve_client_setting(
+            task,
+            "redis",
+            "max_response_size",
+            max_response_size,
+            16 * 1024 * 1024,
+        )
+        self.max_nesting_depth = resolve_client_setting(
+            task,
+            "redis",
+            "max_nesting_depth",
+            max_nesting_depth,
+            32,
+        )
+        self.max_buffer_size = resolve_client_setting(
+            task,
+            "redis",
+            "max_buffer_size",
+            max_buffer_size,
+            16 * 1024 * 1024,
+        )
+
+        if (username is not None or password is not None) and not use_tls:
+            warnings.warn(
+                "Redis credentials are being sent without TLS. "
+                "Set use_tls=True to encrypt the connection.",
+                stacklevel=2,
+            )
+
         self.stream = SmallStream(
             task,
             host=host,
@@ -56,6 +91,7 @@ class SmallRedisClient:
             tls_cert_file=tls_cert_file,
             tls_key_file=tls_key_file,
             tls_verify=tls_verify,
+            max_buffer_size=self.max_buffer_size,
         )
 
     @staticmethod
@@ -173,8 +209,15 @@ class SmallRedisClient:
             }
         return {"type": event_type, "data": response[1:]}
 
-    async def _read_response(self):
+    async def _read_response(self, _depth=0):
         """Parse one RESP value from the stream."""
+        if self.max_nesting_depth and _depth > self.max_nesting_depth:
+            raise RedisError(
+                "RESP nesting depth exceeded max_nesting_depth ({}).".format(
+                    self.max_nesting_depth
+                )
+            )
+
         line = await self.stream.read_until(b"\r\n")
         prefix = line[:1]
         payload = line[1:-2]
@@ -192,6 +235,14 @@ class SmallRedisClient:
             length = int(payload.decode("ascii"))
             if length == -1:
                 return None
+            if length < 0:
+                raise RedisError("Invalid negative bulk string length.")
+            if self.max_response_size and length > self.max_response_size:
+                raise RedisError(
+                    "Bulk string of {} bytes exceeds max_response_size ({}).".format(
+                        length, self.max_response_size
+                    )
+                )
             data = await self.stream.read_exactly(length)
             trailer = await self.stream.read_exactly(2)
             if trailer != b"\r\n":
@@ -204,7 +255,7 @@ class SmallRedisClient:
                 return None
             items = []
             for _ in range(length):
-                items.append(await self._read_response())
+                items.append(await self._read_response(_depth=_depth + 1))
             return items
 
         raise RedisError("Unsupported Redis response prefix {!r}".format(prefix))
