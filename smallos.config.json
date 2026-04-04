@@ -1,0 +1,6 @@
+{
+  "task_capacity": 1024,
+  "priority_levels": 10,
+  "io_buffer_length": 1024,
+  "eternal_watchers": false
+}

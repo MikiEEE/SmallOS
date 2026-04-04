@@ -11,6 +11,7 @@ from SmallPackage.SmallErrors import TaskCancelledError
 
 class FakeKernel(Kernel):
     def __init__(self):
+        super().__init__()
         self.now = 0
         self.output = []
         self.readable = set()
@@ -20,15 +21,31 @@ class FakeKernel(Kernel):
         self.output.append(msg)
 
     def time_epoch(self):
+        return self.now / 1000
+
+    def time_monotonic(self):
+        return self.now / 1000
+
+    def ticks_ms(self):
         return self.now
+
+    def ticks_add(self, base, delta_ms):
+        return base + delta_ms
+
+    def ticks_diff(self, end, start):
+        return end - start
 
     def sleep(self, secs):
         if secs > 0:
-            self.now += secs
+            self.now += int(secs * 1000)
 
-    def io_wait(self, readables, writables, timeout=None):
-        if timeout is not None and timeout > 0:
-            self.now += timeout
+    def sleep_ms(self, delay_ms):
+        if delay_ms > 0:
+            self.now += int(delay_ms)
+
+    def io_wait(self, readables, writables, timeout_ms=None):
+        if timeout_ms is not None and timeout_ms > 0:
+            self.now += int(timeout_ms)
 
         ready_read = [obj for obj in readables if obj in self.readable]
         ready_write = [obj for obj in writables if obj in self.writable]
