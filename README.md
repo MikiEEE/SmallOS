@@ -194,6 +194,8 @@ The new demos live in [demos](demos):
   Redis example built on the native cooperative client
 - [demos/http_demo.py](demos/http_demo.py):
   HTTP example built on the native cooperative client
+- [demos/web_app_demo.py](demos/web_app_demo.py):
+  cooperative single-thread web app demo with HTTP routes, live browser UI, and shell-driven server shutdown
 - [demos/mqtt_demo.py](demos/mqtt_demo.py):
   MQTT example built on the native cooperative client
 
