@@ -4,7 +4,8 @@ import unittest
 sys.path.append("..")
 
 from SmallPackage.SmallIO import SmallIO
-from shells import BaseShell
+from SmallPackage.SmallTask import SmallTask
+from SmallPackage.shells import BaseShell
 
 
 class FakeKernel:
@@ -154,6 +155,24 @@ class TestShells(unittest.TestCase):
 
         self.assertEqual(['echo "hello shell"'], self.os_ref.kernel.shell_split_calls)
         self.assertIn("hello shell", output)
+
+    def test_shell_can_build_task_from_factory(self):
+        shell_task = self.shell.make_task(
+            priority=6,
+            name="custom_shell_task",
+            is_watcher=True,
+            poll_interval=0.25,
+            show_banner=False,
+            prompt_on_start=False,
+            force_output=False,
+            echo_commands=True,
+        )
+
+        self.assertIsInstance(shell_task, SmallTask)
+        self.assertEqual(6, shell_task.priority)
+        self.assertEqual("custom_shell_task", shell_task.name)
+        self.assertTrue(shell_task.isWatcher)
+        self.assertTrue(callable(shell_task.routine))
 
 
 if __name__ == "__main__":

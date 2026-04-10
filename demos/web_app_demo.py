@@ -6,8 +6,8 @@ import json
 from common import build_runtime
 
 from SmallPackage import SmallTask, Unix
+from SmallPackage.shells import BaseShell
 from SmallPackage.SmallErrors import TaskCancelledError
-from shells import BaseShell
 
 
 HOST = "127.0.0.1"
@@ -16,8 +16,6 @@ LISTEN_BACKLOG = 16
 REQUEST_HEADER_LIMIT = 8 * 1024
 METRICS_INTERVAL_SECONDS = 5
 STATE_TICK_INTERVAL_SECONDS = 1
-SHELL_KILL_DELAY_SECONDS = 20
-SHELL_COMMAND_STEP_SECONDS = 0.2
 
 
 def _http_reason(status_code):
@@ -269,6 +267,7 @@ async def web_client_handler(task, client_sock, client_addr, state):
     """Handle one inbound HTTP client request and close the connection."""
     kernel = task.OS.kernel
     state["active_connections"] += 1
+    task.OS.print("Accepted connection from {} (active connections: {})\n".format(client_addr, state["active_connections"]))
 
     try:
         try:
@@ -316,6 +315,7 @@ async def web_client_handler(task, client_sock, client_addr, state):
     finally:
         state["active_connections"] = max(0, state["active_connections"] - 1)
         kernel.socket_close(client_sock)
+        task.OS.print("Closed connection from {} (active connections: {})\n".format(client_addr, state["active_connections"]))
 
 
 async def app_state_task(task, state):
@@ -340,41 +340,6 @@ async def metrics_task(task, state):
         await task.sleep(METRICS_INTERVAL_SECONDS)
 
 
-async def shell_control_task(task):
-    """
-    Drive a shell session that kills the web server from inside smallOS.
-
-    This demonstrates runtime control through shell commands without relying on
-    external OS process management.
-    """
-    shell = task.OS.shells[0]
-    task.OS.print(
-        "shell control will stop web_server in {} seconds\n".format(
-            SHELL_KILL_DELAY_SECONDS
-        )
-    )
-    await task.sleep(SHELL_KILL_DELAY_SECONDS)
-
-    web_pid = _pid_for_name(task.OS, "web_server")
-    if web_pid is None:
-        shell.run("ps", show_prompt=False, echo_command=True, force_output=True)
-        return "web_server already stopped"
-
-    script = [
-        "count",
-        "ps",
-        "stat {}".format(web_pid),
-        "kill {}".format(web_pid),
-        "count",
-        "ps",
-    ]
-    for command in script:
-        shell.run(command, show_prompt=False, echo_command=True, force_output=True)
-        await task.sleep(SHELL_COMMAND_STEP_SECONDS)
-
-    return "shell stopped web_server"
-
-
 async def web_server_task(task, state):
     """Run a small cooperative HTTP server on one non-blocking listener."""
     kernel = task.OS.kernel
@@ -397,6 +362,7 @@ async def web_server_task(task, state):
 
     task.OS.print("smallOS web app running on http://{}:{}/\n".format(HOST, PORT))
     task.OS.print("routes: /  /api/stats  /api/time  /healthz\n")
+    task.OS.print("web_server PID: {}\n".format(task.getID()))
 
     try:
         while True:
@@ -428,6 +394,7 @@ def main():
     runtime = build_runtime(Unix())
     shell = BaseShell(prompt="webapp> ", allow_python=False)
     runtime.shells.append(shell.setOS(runtime))
+
     state = {
         "started_ms": runtime.kernel.scheduler_now_ms(),
         "requests_total": 0,
@@ -438,19 +405,34 @@ def main():
     }
 
     web_server = SmallTask(2, web_server_task, name="web_server", args=(state,))
-    shell_control = SmallTask(3, shell_control_task, name="shell_control")
+    shell_stdin = shell.make_task(
+        priority=3,
+        name="shell_stdin",
+        is_watcher=True,
+        poll_interval=0.1,
+        banner_text=(
+            "\nInteractive shell enabled while web app runs.\n"
+            "Type commands like: count, ps, stat <pid>, kill <pid>, toggle, help\n"
+        ),
+        force_output=True,
+    )
     app_state = SmallTask(5, app_state_task, name="app_state", args=(state,), isWatcher=True)
     metrics = SmallTask(7, metrics_task, name="metrics", args=(state,), isWatcher=True)
 
-    runtime.fork([web_server, shell_control, app_state, metrics])
+    runtime.fork([web_server, shell_stdin, app_state, metrics])
     runtime.startOS()
 
     if web_server.exception is not None and not isinstance(web_server.exception, TaskCancelledError):
         raise web_server.exception
     if isinstance(web_server.exception, TaskCancelledError):
         runtime.print("web_server was stopped by shell command\n")
-    if shell_control.exception is not None:
-        raise shell_control.exception
+
+    if shell_stdin.exception is not None:
+        raise shell_stdin.exception
+
+    web_pid = _pid_for_name(runtime, "web_server")
+    if web_pid is None:
+        runtime.print("web app demo ended (web_server no longer running)\n")
 
 
 if __name__ == "__main__":
