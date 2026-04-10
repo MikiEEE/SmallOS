@@ -18,7 +18,7 @@ out of the shell module itself and makes it easier to keep the shell portable
 to MicroPython targets.
 """
 
-from SmallPackage.SmallSignals import SmallSignals
+from .SmallSignals import SmallSignals
 
 
 class ShellCommandError(Exception):
@@ -111,6 +111,117 @@ class BaseShell:
         """Emit the shell prompt."""
         self.write(self.prompt, force=force)
         return
+
+    async def run_stdin_loop(
+        self,
+        task,
+        stdin_obj=None,
+        poll_interval=0.1,
+        show_banner=True,
+        banner_text=None,
+        prompt_on_start=True,
+        force_output=True,
+        echo_commands=False,
+    ):
+        """
+        Run an interactive shell loop sourced from stdin-like input.
+
+        This is designed for demos and local tooling where we want web/server
+        tasks and shell commands to coexist in one cooperative scheduler.
+        """
+        if self.OS is None and getattr(task, "OS", None) is not None:
+            self.setOS(task.OS)
+
+        kernel = self._kernel()
+        if stdin_obj is None:
+            stdin_obj = getattr(getattr(kernel, "_sys", None), "stdin", None)
+
+        if stdin_obj is None or not hasattr(stdin_obj, "readline"):
+            self.write("shell stdin watcher unavailable on this kernel\n", force=True)
+            return "shell stdin unavailable"
+
+        if show_banner:
+            text = banner_text
+            if text is None:
+                text = (
+                    "\nInteractive shell enabled.\n"
+                    "Type commands like: help, count, ps, stat <pid>, kill <pid>\n"
+                )
+            self.write(text, force=force_output)
+
+        if prompt_on_start and self.is_running:
+            self.prompt_user(force=force_output)
+
+        while self.is_running:
+            if hasattr(stdin_obj, "fileno"):
+                await task.wait_readable(stdin_obj)
+            else:
+                await task.sleep(poll_interval)
+
+            line = stdin_obj.readline()
+            if line is None:
+                await task.sleep(poll_interval)
+                continue
+
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="replace")
+
+            if line == "":
+                # EOF or no complete line available yet.
+                await task.sleep(poll_interval)
+                continue
+
+            self.run(
+                line,
+                show_prompt=True,
+                echo_command=echo_commands,
+                force_output=force_output,
+            )
+
+        return "shell session closed"
+
+    def make_task(
+        self,
+        priority=3,
+        name="shell_stdin",
+        is_watcher=True,
+        stdin_obj=None,
+        poll_interval=0.1,
+        show_banner=True,
+        banner_text=None,
+        prompt_on_start=True,
+        force_output=True,
+        echo_commands=False,
+        **task_kwargs
+    ):
+        """
+        Build a ready-to-fork ``SmallTask`` that runs this shell's stdin loop.
+
+        Typical usage:
+        - ``shell = BaseShell().setOS(runtime)``
+        - ``shell_task = shell.make_task(priority=3)``
+        - ``runtime.fork([shell_task, ...])``
+        """
+        from .SmallTask import SmallTask
+
+        async def _shell_task_routine(task):
+            return await self.run_stdin_loop(
+                task,
+                stdin_obj=stdin_obj,
+                poll_interval=poll_interval,
+                show_banner=show_banner,
+                banner_text=banner_text,
+                prompt_on_start=prompt_on_start,
+                force_output=force_output,
+                echo_commands=echo_commands,
+            )
+
+        if "name" not in task_kwargs:
+            task_kwargs["name"] = name
+        if "isWatcher" not in task_kwargs:
+            task_kwargs["isWatcher"] = is_watcher
+
+        return SmallTask(priority, _shell_task_routine, **task_kwargs)
 
     def run(self, line, show_prompt=True, echo_command=False, force_output=False):
         """

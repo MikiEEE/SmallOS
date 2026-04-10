@@ -61,7 +61,7 @@ That makes it a good fit for:
   runtime configuration loader/container
 - [smallos.config.json](smallos.config.json):
   repo-level runtime defaults
-- [shells.py](shells.py):
+- [SmallPackage/shells.py](SmallPackage/shells.py):
   command shell helpers for runtime inspection and demos
 - [demos](demos):
   desktop and board-specific demo entry points
