@@ -37,6 +37,8 @@ class TestSmallOSConfig(unittest.TestCase):
                     "client_defaults": {
                         "stream": {"max_buffer_size": 4096},
                         "mqtt": {"keepalive": 45},
+                        "sse": {"max_event_size": 2048},
+                        "websocket": {"max_frame_size": 8192},
                     },
                 },
                 handle,
@@ -54,6 +56,8 @@ class TestSmallOSConfig(unittest.TestCase):
         self.assertFalse(config.eternal_watchers)
         self.assertEqual(4096, config.client_defaults["stream"]["max_buffer_size"])
         self.assertEqual(45, config.client_defaults["mqtt"]["keepalive"])
+        self.assertEqual(2048, config.client_defaults["sse"]["max_event_size"])
+        self.assertEqual(8192, config.client_defaults["websocket"]["max_frame_size"])
 
     def test_smallos_uses_config_for_runtime_sizing(self):
         config = SmallOSConfig(
