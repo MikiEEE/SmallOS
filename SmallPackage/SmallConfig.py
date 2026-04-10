@@ -24,6 +24,15 @@ _DEFAULT_CLIENT_DEFAULTS = {
         "max_packet_size": 256 * 1024,
         "max_queued_messages": 1024,
     },
+    "sse": {
+        "max_event_size": 1024 * 1024,
+        "max_line_size": 64 * 1024,
+    },
+    "websocket": {
+        "max_frame_size": 1024 * 1024,
+        "max_message_size": 4 * 1024 * 1024,
+        "max_line_size": 16 * 1024,
+    },
 }
 
 
