@@ -95,10 +95,10 @@ def main():
     runtime = build_runtime(Unix())
     runtime.fork(
         [
-            # SmallTask(2, http_request_demo, name="http_request_demo"),
-            # SmallTask(2, join_demo, name="join_demo"),
+            SmallTask(2, http_request_demo, name="http_request_demo"),
+            SmallTask(2, join_demo, name="join_demo"),
             SmallTask(4, signal_demo, name="signal_demo"),
-            # SmallTask(6, cooperative_demo, name="cooperative_demo"),
+            SmallTask(6, cooperative_demo, name="cooperative_demo"),
         ]
     )
     runtime.startOS()

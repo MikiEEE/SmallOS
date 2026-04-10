@@ -165,6 +165,29 @@ class TestRuntime(unittest.TestCase):
 
         self.assertTrue(waiter_task.result)
 
+    def test_killing_io_waiter_clears_wait_registration(self):
+        io_obj = object()
+
+        async def io_waiter(task, watched):
+            await task.wait_readable(watched)
+            return "unexpected"
+
+        async def killer(task, target):
+            await task.sleep(0.2)
+            target.kill()
+            return "killed"
+
+        async def parent(task, watched):
+            child = task.spawn(io_waiter, priority=3, name="io_waiter", args=(watched,))
+            task.spawn(killer, priority=1, name="killer", args=(child,))
+            await task.sleep(0.5)
+            return watched not in task.OS.ioReadWaiters
+
+        parent_task = SmallTask(2, parent, name="parent", args=(io_obj,))
+        self.build_os(parent_task)
+
+        self.assertTrue(parent_task.result)
+
 
 if __name__ == "__main__":
     unittest.main()
