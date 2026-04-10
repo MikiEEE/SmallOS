@@ -272,6 +272,88 @@ Constructor tuning:
 - `max_queued_messages`
 - `max_buffer_size`
 
+## SmallSSEClient
+
+File:
+[SmallHTTP.py](SmallHTTP.py)
+
+`SmallSSEClient` keeps a cooperative `text/event-stream` connection open and
+parses SSE events without threads.
+
+Current scope:
+- long-lived HTTP GET stream connection
+- `id`, `event`, `data`, and `retry` SSE fields
+- per-event size caps and per-line size caps
+
+Typical example:
+
+```python
+from SmallPackage import SmallSSEClient
+
+
+async def sse_job(task):
+    client = SmallSSEClient(task, base_url="http://127.0.0.1:9000")
+    await client.connect("/events", params={"topic": "smallos"})
+    event = await client.read_event()
+    client.close()
+    return event
+```
+
+Useful methods:
+- `await client.connect(path="", headers=None, params=None, last_event_id=None)`
+- `await client.read_event()`
+- `client.close()`
+
+Constructor tuning:
+- `max_event_size`
+- `max_line_size`
+- `max_buffer_size`
+
+## SmallWebSocketClient
+
+File:
+[SmallWebSocket.py](SmallWebSocket.py)
+
+`SmallWebSocketClient` provides cooperative WebSocket messaging on top of
+`SmallStream`.
+
+Current scope:
+- ws/wss handshake (RFC 6455, version 13)
+- text and binary sends
+- receive text/binary messages with fragmentation support
+- automatic pong replies to server ping frames
+- close/disconnect helpers
+
+Typical example:
+
+```python
+from SmallPackage import SmallWebSocketClient
+
+
+async def ws_job(task):
+    client = SmallWebSocketClient(task, base_url="ws://127.0.0.1:9001")
+    await client.connect("/chat")
+    await client.send_text("hello")
+    message = await client.receive()
+    await client.disconnect()
+    return message
+```
+
+Useful methods:
+- `await client.connect(path=None, params=None, headers=None, subprotocols=None, origin=None)`
+- `await client.send_text(text)`
+- `await client.send_binary(data)`
+- `await client.ping(payload=b"")`
+- `await client.receive()`
+- `await client.disconnect(code=1000, reason="")`
+- `client.close()`
+
+Constructor tuning:
+- `max_frame_size`
+- `max_message_size`
+- `max_line_size`
+- `max_buffer_size`
+
 ## TLS and Auth Notes
 
 All current client helpers share the same transport-level TLS pattern.
@@ -305,6 +387,12 @@ Use `SmallRedisClient` when:
 
 Use `SmallMQTTClient` when:
 - you want broker messaging without threads or `asyncio`
+
+Use `SmallSSEClient` when:
+- you want long-lived server push over HTTP event streams
+
+Use `SmallWebSocketClient` when:
+- you want bidirectional low-latency messaging over one socket
 
 Use `SmallStream` when:
 - you are implementing your own protocol
