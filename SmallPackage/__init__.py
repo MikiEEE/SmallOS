@@ -4,12 +4,16 @@ from .Kernel import ESP32, ESP8266, MicroPythonKernel, PicoW, RaspberryPiPicoW, 
 from .SmallConfig import SmallOSConfig
 from .clients import (
     HTTPProtocolError,
+    SSEProtocolError,
     SmallHTTPClient,
     SmallHTTPResponse,
     SmallMQTTClient,
     SmallRedisClient,
+    SmallSSEClient,
     SmallStream,
+    SmallWebSocketClient,
     StreamClosedError,
+    WebSocketProtocolError,
 )
 from .SmallOS import SmallOS
 from .SmallTask import SmallTask
@@ -27,9 +31,13 @@ __all__ = [
     "SmallOS",
     "SmallOSConfig",
     "SmallRedisClient",
+    "SmallSSEClient",
     "SmallStream",
     "SmallTask",
+    "SmallWebSocketClient",
+    "SSEProtocolError",
     "StreamClosedError",
     "Unix",
+    "WebSocketProtocolError",
     "build_micropython_kernel",
 ]

@@ -18,7 +18,7 @@ The project is currently experimental but usable. The runtime core supports:
 - time-based sleeping
 - readiness-based socket/I/O waiting
 - generic TCP/TLS kernel hooks for higher-level protocols
-- smallOS-native HTTP, Redis, and MQTT helper clients
+- smallOS-native HTTP, Redis, MQTT, SSE, and WebSocket helper clients
 
 ## Why smallOS?
 
@@ -48,13 +48,15 @@ That makes it a good fit for:
 - [SmallPackage/clients/README.md](SmallPackage/clients/README.md):
   detailed client-specific guide and API notes
 - [SmallPackage/clients/SmallHTTP.py](SmallPackage/clients/SmallHTTP.py):
-  dependency-free HTTP client for smallOS tasks
+  dependency-free HTTP and SSE clients for smallOS tasks
 - [SmallPackage/clients/SmallStream.py](SmallPackage/clients/SmallStream.py):
   cooperative socket stream helper for protocol clients
 - [SmallPackage/clients/SmallRedis.py](SmallPackage/clients/SmallRedis.py):
   dependency-free Redis client for smallOS tasks
 - [SmallPackage/clients/SmallMQTT.py](SmallPackage/clients/SmallMQTT.py):
   dependency-free MQTT client for smallOS tasks
+- [SmallPackage/clients/SmallWebSocket.py](SmallPackage/clients/SmallWebSocket.py):
+  dependency-free WebSocket client for bidirectional messaging
 - [SmallPackage/SmallConfig.py](SmallPackage/SmallConfig.py):
   runtime configuration loader/container
 - [smallos.config.json](smallos.config.json):
