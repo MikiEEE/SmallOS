@@ -17,10 +17,12 @@ from .clients import (
 )
 from .SmallOS import SmallOS
 from .SmallTask import SmallTask
+from .shells import BaseShell, ShellCommandError
 
 __all__ = [
     "ESP32",
     "ESP8266",
+    "BaseShell",
     "HTTPProtocolError",
     "MicroPythonKernel",
     "PicoW",
@@ -36,6 +38,7 @@ __all__ = [
     "SmallTask",
     "SmallWebSocketClient",
     "SSEProtocolError",
+    "ShellCommandError",
     "StreamClosedError",
     "Unix",
     "WebSocketProtocolError",
