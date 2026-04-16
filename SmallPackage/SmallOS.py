@@ -374,6 +374,9 @@ class SmallOS(SmallIO):
             return
         if not self.ioReadWaiters and not self.ioWriteWaiters:
             return
+        self._fail_invalid_io_waiters()
+        if not self.ioReadWaiters and not self.ioWriteWaiters:
+            return
 
         readable, writable = self.kernel.io_wait(
             list(self.ioReadWaiters.keys()),
@@ -382,6 +385,43 @@ class SmallOS(SmallIO):
         )
         self._resume_io_waiters(readable, self.ioReadWaiters)
         self._resume_io_waiters(writable, self.ioWriteWaiters)
+
+    def _fail_invalid_io_waiters(self):
+        """
+        Resume waiters whose I/O objects are already closed or otherwise invalid.
+
+        Poll/select backends raise immediately when handed a stale descriptor,
+        which would otherwise take down the whole runtime before the affected
+        task can observe the problem.
+        """
+        validator = getattr(self.kernel, "validate_io_wait_object", None)
+        if validator is None:
+            return
+        self._fail_invalid_io_waiters_in_map(self.ioReadWaiters, validator)
+        self._fail_invalid_io_waiters_in_map(self.ioWriteWaiters, validator)
+
+    def _fail_invalid_io_waiters_in_map(self, waiters_map, validator):
+        """Detach invalid I/O objects from ``waiters_map`` and fail their waiters."""
+        for io_obj in list(waiters_map.keys()):
+            is_valid, exc = validator(io_obj)
+            if is_valid:
+                continue
+
+            waiters = waiters_map.pop(io_obj, [])
+            for waiter in waiters:
+                if waiter.done or self.tasks.search(waiter.getID()) == -1:
+                    continue
+                self.resume_task(waiter, exc=self._clone_wait_error(exc), front=True)
+
+    def _clone_wait_error(self, exc):
+        """Return a fresh exception instance for resuming a blocked waiter."""
+        if isinstance(exc, BaseException):
+            args = getattr(exc, "args", ())
+            try:
+                return exc.__class__(*args)
+            except Exception:
+                return RuntimeError(str(exc))
+        return RuntimeError("I/O wait object is no longer valid.")
 
     def _resume_io_waiters(self, ready_objects, waiters_map):
         """Resume every task waiting on the now-ready I/O objects."""
