@@ -184,7 +184,7 @@ class SmallOS(SmallIO):
         """
         Requeue a blocked task with the value or exception that completed it.
 
-        Centralizing resume logic here ensures stale join registrations are
+        Centralizing resume logic here ensures scheduler-owned wait state is
         cleared before a task gets a chance to block on something else.
         """
         if task is None or task == -1 or task.done:
@@ -192,7 +192,7 @@ class SmallOS(SmallIO):
         if self.tasks.search(task.getID()) == -1:
             return -1
 
-        self._clear_wait_registration(task)
+        self._clear_wait_state(task)
         task.resume(value=value, exc=exc)
         self.tasks.enqueue(task, front=front)
         return 0
@@ -243,9 +243,7 @@ class SmallOS(SmallIO):
 
             delay_ms = max(0, int(seconds * 1000))
             wake_time = self.kernel.scheduler_now_ms() + delay_ms if self.kernel else delay_ms
-            task.block("sleep")
-            task._wake_at = wake_time
-            self.tasks.add_sleeping(task, wake_time)
+            self._enter_sleep_wait(task, wake_time)
             return
 
         if operation == "wait_signal":
@@ -253,22 +251,15 @@ class SmallOS(SmallIO):
             if task.checkSignal(signal):
                 self.resume_task(task, value=signal, front=True)
             else:
-                task.block("signal")
-                task._waiting_signal = signal
+                self._enter_signal_wait(task, signal)
             return
 
         if operation == "wait_readable":
-            task.block("wait_readable")
-            task._io_wait_obj = payload["io_obj"]
-            task._io_wait_mode = "read"
-            self._register_io_wait(task, payload["io_obj"], "read")
+            self._enter_io_wait(task, payload["io_obj"], "read")
             return
 
         if operation == "wait_writable":
-            task.block("wait_writable")
-            task._io_wait_obj = payload["io_obj"]
-            task._io_wait_mode = "write"
-            self._register_io_wait(task, payload["io_obj"], "write")
+            self._enter_io_wait(task, payload["io_obj"], "write")
             return
 
         if operation == "join":
@@ -281,9 +272,7 @@ class SmallOS(SmallIO):
             if target.done:
                 self._resume_from_completed(task, target)
             else:
-                task.block("join")
-                task._join_target = target
-                target.add_join_waiter(task)
+                self._enter_join_wait(task, target)
             return
 
         if operation == "join_all":
@@ -309,12 +298,7 @@ class SmallOS(SmallIO):
 
             # Preserve the original child ordering for the eventual results
             # while also tracking a fast set of outstanding child PIDs.
-            task.block("join_all")
-            task._join_targets = targets
-            task._join_pending = pending
-            for child in targets:
-                if not child.done:
-                    child.add_join_waiter(task)
+            self._enter_join_all_wait(task, targets, pending)
             return
 
         task.fail(UnsupportedAwaitableError("Unknown instruction {!r}".format(operation)))
@@ -353,6 +337,67 @@ class SmallOS(SmallIO):
             if task.exception is not None:
                 return task.exception
         return None
+
+    def _clear_wait_state(self, task):
+        """
+        Remove a task from scheduler wait bookkeeping and reset its wait metadata.
+
+        The scheduler owns the blocked-state lifecycle, so runtime transitions
+        clear both registration-based wait structures and the task's stored wait
+        markers from one place.
+        """
+        self._clear_wait_registration(task)
+        self._clear_wait_metadata(task)
+
+    def _clear_wait_metadata(self, task):
+        """Reset the scheduler-owned wait metadata stored on ``task``."""
+        task._blocked_reason = None
+        task._wake_at = None
+        task._waiting_signal = None
+        task._join_target = None
+        task._join_targets = None
+        task._join_pending = set()
+        task._io_wait_obj = None
+        task._io_wait_mode = None
+
+    def _begin_wait(self, task, reason):
+        """Prepare a runnable task to transition into one blocked wait state."""
+        self._clear_wait_state(task)
+        task.block(reason)
+
+    def _enter_sleep_wait(self, task, wake_time):
+        """Put ``task`` to sleep until ``wake_time``."""
+        self._begin_wait(task, "sleep")
+        task._wake_at = wake_time
+        self.tasks.add_sleeping(task, wake_time)
+
+    def _enter_signal_wait(self, task, signal):
+        """Block ``task`` until ``signal`` is delivered."""
+        self._begin_wait(task, "signal")
+        task._waiting_signal = signal
+
+    def _enter_io_wait(self, task, io_obj, mode):
+        """Register ``task`` for readable or writable I/O readiness."""
+        reason = "wait_readable" if mode == "read" else "wait_writable"
+        self._begin_wait(task, reason)
+        task._io_wait_obj = io_obj
+        task._io_wait_mode = mode
+        self._register_io_wait(task, io_obj, mode)
+
+    def _enter_join_wait(self, task, target):
+        """Block ``task`` until ``target`` finishes."""
+        self._begin_wait(task, "join")
+        task._join_target = target
+        target.add_join_waiter(task)
+
+    def _enter_join_all_wait(self, task, targets, pending):
+        """Block ``task`` until every child in ``pending`` has completed."""
+        self._begin_wait(task, "join_all")
+        task._join_targets = list(targets)
+        task._join_pending = set(pending)
+        for child in targets:
+            if not child.done:
+                child.add_join_waiter(task)
 
     def _register_io_wait(self, task, io_obj, mode):
         """Register a task as waiting on an I/O object's readiness event."""
@@ -434,20 +479,17 @@ class SmallOS(SmallIO):
 
     def _clear_wait_registration(self, task):
         """
-        Remove a task from any join bookkeeping it currently participates in.
+        Remove a task from any registration-based wait bookkeeping.
 
         This prevents leaked waiter references when a task is resumed,
         cancelled, or moved from one wait condition to another.
         """
         if task._join_target is not None:
             task._join_target.discard_join_waiter(task)
-            task._join_target = None
 
         if task._join_targets:
             for child in task._join_targets:
                 child.discard_join_waiter(task)
-            task._join_targets = None
-            task._join_pending = set()
 
         if task._io_wait_obj is not None and task._io_wait_mode is not None:
             waiters_map = self.ioReadWaiters if task._io_wait_mode == "read" else self.ioWriteWaiters
@@ -456,8 +498,6 @@ class SmallOS(SmallIO):
                 waiters.remove(task)
             if not waiters and task._io_wait_obj in waiters_map:
                 del waiters_map[task._io_wait_obj]
-            task._io_wait_obj = None
-            task._io_wait_mode = None
 
     def _detach_from_parent(self, task):
         """Remove a finished child PID from its parent's child list."""
@@ -485,7 +525,6 @@ class SmallOS(SmallIO):
                 continue
 
             if waiter._blocked_reason == "join" and waiter._join_target is task:
-                waiter._join_target = None
                 self._resume_from_completed(waiter, task)
                 continue
 
@@ -493,19 +532,17 @@ class SmallOS(SmallIO):
                 if task.exception is not None:
                     # ``join_all`` behaves like structured concurrency here:
                     # one child failure wakes the parent immediately.
-                    self._clear_wait_registration(waiter)
                     self.resume_task(waiter, exc=task.exception, front=True)
                     continue
 
                 waiter._join_pending.discard(task.getID())
                 if not waiter._join_pending:
                     results = [child.result for child in waiter._join_targets]
-                    self._clear_wait_registration(waiter)
                     self.resume_task(waiter, value=results, front=True)
 
     def _finalize_task(self, task):
         """Run the full shutdown sequence for a finished or cancelled task."""
-        self._clear_wait_registration(task)
+        self._clear_wait_state(task)
         self._notify_waiters(task)
         self._detach_from_parent(task)
         self.tasks.delete(task.getID())
