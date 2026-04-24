@@ -8,8 +8,11 @@ from SmallPackage.clients import HTTPProtocolError, SmallHTTPClient
 from SmallPackage.clients import SmallMQTTClient
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.clients import SmallRedisClient
+from SmallPackage.clients import SmallSSEClient, SmallWebSocketClient
 from SmallPackage.clients.SmallMQTT import MQTTProtocolError
 from SmallPackage.clients.SmallRedis import RedisError
+from SmallPackage.clients.SmallHTTP import SSEProtocolError
+from SmallPackage.clients.SmallWebSocket import WebSocketProtocolError
 from SmallPackage.SmallTask import SmallTask
 
 
@@ -113,6 +116,35 @@ class ScriptedKernel(Kernel):
             }
         )
         return sock
+
+
+def _decode_client_frame(frame):
+    first = frame[0]
+    second = frame[1]
+    opcode = first & 0x0F
+    masked = bool(second & 0x80)
+    if not masked:
+        raise ValueError("expected masked client frame")
+
+    length = second & 0x7F
+    cursor = 2
+    if length == 126:
+        length = int.from_bytes(frame[cursor:cursor + 2], "big")
+        cursor += 2
+    elif length == 127:
+        length = int.from_bytes(frame[cursor:cursor + 8], "big")
+        cursor += 8
+
+    mask = frame[cursor:cursor + 4]
+    cursor += 4
+    payload = bytearray(frame[cursor:cursor + length])
+    for idx in range(length):
+        payload[idx] ^= mask[idx % 4]
+
+    return {
+        "opcode": opcode,
+        "payload": bytes(payload),
+    }
 
 
 class TestProtocolClients(unittest.TestCase):
@@ -606,6 +638,182 @@ class TestProtocolClients(unittest.TestCase):
         )
         self.assertIsInstance(root.exception, MQTTProtocolError)
         self.assertIn("max_packet_size", str(root.exception))
+
+    def test_sse_client_supports_connect_and_event_parsing(self):
+        sse_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 200 OK\r\n",
+                b"Content-Type: text/event-stream\r\n",
+                b"Cache-Control: no-cache\r\n",
+                b"\r\n",
+                b"id: 7\n",
+                b"event: tick\n",
+                b"data: one\n",
+                b"data: two\n",
+                b"\n",
+            ]
+        )
+
+        async def sse_job(task):
+            client = SmallSSEClient(task, host="events.local", port=8080)
+            await client.connect("/stream", params={"topic": "demo"})
+            event = await client.read_event()
+            client.close()
+            return event
+
+        root = SmallTask(2, sse_job, name="sse_job")
+        self.build_os(sse_socket, root)
+
+        self.assertEqual(
+            {"event": "tick", "data": "one\ntwo", "id": "7"},
+            root.result,
+        )
+        self.assertTrue(sse_socket.closed)
+        self.assertIn(b"GET /stream?topic=demo HTTP/1.1", sse_socket.sent[0])
+        self.assertIn(b"Accept: text/event-stream\r\n", sse_socket.sent[0])
+
+    def test_sse_client_inherits_max_event_size_from_runtime_config(self):
+        sse_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 200 OK\r\n",
+                b"Content-Type: text/event-stream\r\n",
+                b"\r\n",
+                b"data: 123456\n",
+                b"\n",
+            ]
+        )
+
+        async def sse_job(task):
+            client = SmallSSEClient(task, host="events.local")
+            await client.connect("/events")
+            try:
+                await client.read_event()
+            finally:
+                client.close()
+
+        root = SmallTask(2, sse_job, name="sse_limit_job")
+        self.build_os(
+            sse_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "sse": {"max_event_size": 5},
+                }
+            },
+        )
+
+        self.assertIsInstance(root.exception, SSEProtocolError)
+        self.assertIn("max_event_size", str(root.exception))
+
+    def test_websocket_client_supports_handshake_send_and_receive(self):
+        ws_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 101 Switching Protocols\r\n",
+                b"Upgrade: websocket\r\n",
+                b"Connection: Upgrade\r\n",
+                b"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n",
+                b"\r\n",
+                b"\x81\x05hello",
+            ]
+        )
+
+        async def ws_job(task):
+            client = SmallWebSocketClient(
+                task,
+                host="ws.local",
+                port=9000,
+                client_key="dGhlIHNhbXBsZSBub25jZQ==",
+            )
+            await client.connect("/chat", params={"room": "demo"})
+            await client.send_text("ping")
+            message = await client.receive()
+            await client.disconnect()
+            return message
+
+        root = SmallTask(2, ws_job, name="ws_job")
+        self.build_os(ws_socket, root)
+
+        self.assertEqual({"type": "text", "data": "hello"}, root.result)
+        self.assertTrue(ws_socket.closed)
+        self.assertIn(b"GET /chat?room=demo HTTP/1.1", ws_socket.sent[0])
+        self.assertIn(b"Upgrade: websocket\r\n", ws_socket.sent[0])
+
+        text_frame = _decode_client_frame(ws_socket.sent[1])
+        close_frame = _decode_client_frame(ws_socket.sent[2])
+        self.assertEqual(0x1, text_frame["opcode"])
+        self.assertEqual(b"ping", text_frame["payload"])
+        self.assertEqual(0x8, close_frame["opcode"])
+
+    def test_websocket_client_auto_replies_to_ping_frames(self):
+        ws_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 101 Switching Protocols\r\n",
+                b"Upgrade: websocket\r\n",
+                b"Connection: Upgrade\r\n",
+                b"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n",
+                b"\r\n",
+                b"\x89\x01z",
+                b"\x81\x02ok",
+            ]
+        )
+
+        async def ws_job(task):
+            client = SmallWebSocketClient(
+                task,
+                host="ws.local",
+                client_key="dGhlIHNhbXBsZSBub25jZQ==",
+            )
+            await client.connect("/ws")
+            message = await client.receive()
+            await client.disconnect()
+            return message
+
+        root = SmallTask(2, ws_job, name="ws_ping_job")
+        self.build_os(ws_socket, root)
+
+        self.assertEqual({"type": "text", "data": "ok"}, root.result)
+        pong_frame = _decode_client_frame(ws_socket.sent[1])
+        self.assertEqual(0xA, pong_frame["opcode"])
+        self.assertEqual(b"z", pong_frame["payload"])
+
+    def test_websocket_client_inherits_max_frame_size_from_runtime_config(self):
+        payload = b"x" * 130
+        ws_socket = ScriptedSocket(
+            [
+                b"HTTP/1.1 101 Switching Protocols\r\n",
+                b"Upgrade: websocket\r\n",
+                b"Connection: Upgrade\r\n",
+                b"Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n",
+                b"\r\n",
+                b"\x81\x7E\x00\x82" + payload,
+            ]
+        )
+
+        async def ws_job(task):
+            client = SmallWebSocketClient(
+                task,
+                host="ws.local",
+                client_key="dGhlIHNhbXBsZSBub25jZQ==",
+            )
+            await client.connect("/big")
+            try:
+                await client.receive()
+            finally:
+                client.close()
+
+        root = SmallTask(2, ws_job, name="ws_limit_job")
+        self.build_os(
+            ws_socket,
+            root,
+            config={
+                "client_defaults": {
+                    "websocket": {"max_frame_size": 64},
+                }
+            },
+        )
+
+        self.assertIsInstance(root.exception, WebSocketProtocolError)
+        self.assertIn("max_frame_size", str(root.exception))
 
 
 if __name__ == "__main__":
