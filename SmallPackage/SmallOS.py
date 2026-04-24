@@ -559,6 +559,10 @@ class SmallOS(SmallIO):
                 if child != -1:
                     self.cancel_task(child, recursive=True)
 
+        # Remove any active wait registrations before cancellation resets task
+        # bookkeeping fields. This prevents stale I/O waiters from surviving
+        # after the task is gone.
+        self._clear_wait_registration(target)
         target.cancel()
         self._finalize_task(target)
         return 0
