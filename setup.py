@@ -16,7 +16,6 @@ setup(
     name="SmallPackage",
     version=VERSION,
     packages=find_packages(),
-    py_modules=["shells"],
     include_package_data=True,
     package_data={"SmallPackage.clients": ["README.md"]},
     install_requires=[],

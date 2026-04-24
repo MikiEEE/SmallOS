@@ -1,13 +1,14 @@
 """
 SmallOS-native HTTP helpers.
 
-This module gives smallOS tasks a compact, dependency-light HTTP client built
-on the same cooperative socket stream used by the Redis and MQTT helpers. The
-goal is convenience, not full browser parity:
+This module gives smallOS tasks compact, dependency-light HTTP and SSE clients
+built on the same cooperative socket stream used by the Redis and MQTT
+helpers. The goal is convenience, not full browser parity:
 - HTTP/1.1 requests over plain TCP or TLS
 - simple `get` / `post` / `put` / `patch` / `delete` helpers
 - query string, form body, and JSON body support
 - response parsing for content-length, chunked transfer, and connection-close
+- long-lived Server-Sent Events (`text/event-stream`) consumption
 
 The client intentionally closes the transport after each request. That keeps
 the implementation easy to reason about and works well for the common
@@ -22,6 +23,10 @@ from .SmallStream import SmallStream, StreamClosedError
 
 class HTTPProtocolError(Exception):
     """Raised when the peer sends malformed or unsupported HTTP data."""
+
+
+class SSEProtocolError(Exception):
+    """Raised when an SSE endpoint returns malformed or unsupported data."""
 
 
 def _sanitize_header_value(value):
@@ -484,3 +489,270 @@ class SmallHTTPClient:
                 chunks.append(chunk)
             except StreamClosedError:
                 return b"".join(chunks)
+
+
+class SmallSSEClient:
+    """
+    Minimal cooperative SSE client for smallOS tasks.
+
+    Typical flow:
+    - `await client.connect(...)`
+    - repeatedly `await client.read_event()`
+    - `client.close()` when finished
+    """
+
+    def __init__(
+        self,
+        task,
+        base_url=None,
+        host=None,
+        port=None,
+        use_tls=False,
+        server_hostname=None,
+        default_headers=None,
+        tls_ca_file=None,
+        tls_cert_file=None,
+        tls_key_file=None,
+        tls_verify=True,
+        max_event_size=MISSING,
+        max_line_size=MISSING,
+        max_buffer_size=MISSING,
+    ):
+        self.task = task
+        self.default_headers = dict(default_headers or {})
+        self.tls_ca_file = tls_ca_file
+        self.tls_cert_file = tls_cert_file
+        self.tls_key_file = tls_key_file
+        self.tls_verify = tls_verify
+        self.max_event_size = resolve_client_setting(
+            task,
+            "sse",
+            "max_event_size",
+            max_event_size,
+            1024 * 1024,
+        )
+        self.max_line_size = resolve_client_setting(
+            task,
+            "sse",
+            "max_line_size",
+            max_line_size,
+            64 * 1024,
+        )
+        self.max_buffer_size = resolve_client_setting(
+            task,
+            "sse",
+            "max_buffer_size",
+            max_buffer_size,
+            16 * 1024 * 1024,
+        )
+        self.base_path = ""
+        self._event_state = None
+        self.stream = None
+        self.connected = False
+
+        if base_url is not None:
+            parsed = _parse_base_url(base_url)
+            host = parsed["host"]
+            port = parsed["port"]
+            use_tls = parsed["use_tls"]
+            self.base_path = parsed["base_path"]
+
+        if host is None:
+            raise ValueError("SmallSSEClient requires either host=... or base_url=...")
+
+        self.host = host
+        self.use_tls = bool(use_tls)
+        self.port = int(port or (443 if self.use_tls else 80))
+        self.server_hostname = server_hostname or self.host
+
+    def _default_port(self):
+        return 443 if self.use_tls else 80
+
+    def _host_header(self):
+        if self.port == self._default_port():
+            return self.host
+        return "{}:{}".format(self.host, self.port)
+
+    def _build_target(self, path, params=None):
+        path = (path or "").split("#", 1)[0]
+
+        if path.startswith("/"):
+            target = path
+        elif path:
+            prefix = self.base_path.rstrip("/")
+            target = (prefix + "/" + path.lstrip("/")) if prefix else ("/" + path.lstrip("/"))
+        elif self.base_path:
+            target = self.base_path or "/"
+        else:
+            target = "/"
+
+        query = _encode_query(params)
+        if not query:
+            return target
+        if "?" in target:
+            return "{}&{}".format(target, query)
+        return "{}?{}".format(target, query)
+
+    def _make_stream(self):
+        return SmallStream(
+            self.task,
+            host=self.host,
+            port=self.port,
+            use_tls=self.use_tls,
+            server_hostname=self.server_hostname,
+            tls_ca_file=self.tls_ca_file,
+            tls_cert_file=self.tls_cert_file,
+            tls_key_file=self.tls_key_file,
+            tls_verify=self.tls_verify,
+            max_buffer_size=self.max_buffer_size,
+        )
+
+    async def connect(self, path="", headers=None, params=None, last_event_id=None):
+        """Open the event stream and validate the HTTP response headers."""
+        if self.connected and self.stream is not None:
+            return self
+
+        target = self._build_target(path, params=params)
+
+        request_headers = []
+        for name, value in self.default_headers.items():
+            request_headers.append((str(name), str(value)))
+        for name, value in dict(headers or {}).items():
+            request_headers.append((str(name), str(value)))
+        request_headers.append(("Host", self._host_header()))
+        request_headers.append(("Accept", "text/event-stream"))
+        request_headers.append(("Cache-Control", "no-cache"))
+        request_headers.append(("Connection", "keep-alive"))
+        if last_event_id is not None:
+            request_headers.append(("Last-Event-ID", str(last_event_id)))
+
+        lines = ["GET {} HTTP/1.1".format(target)]
+        for name, value in request_headers:
+            lines.append("{}: {}".format(
+                _sanitize_header_name(name),
+                _sanitize_header_value(value),
+            ))
+        request_bytes = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8")
+
+        stream = self._make_stream()
+        await stream.connect()
+        await stream.send_all(request_bytes)
+
+        status_line = (await stream.read_until(b"\r\n", max_length=self.max_line_size + 2))[:-2]
+        parts = status_line.decode("utf-8", errors="replace").split(" ", 2)
+        if len(parts) < 2 or not parts[0].startswith("HTTP/"):
+            stream.close()
+            raise SSEProtocolError("Malformed HTTP status line.")
+
+        try:
+            status_code = int(parts[1])
+        except ValueError:
+            stream.close()
+            raise SSEProtocolError("Malformed HTTP status code.")
+
+        headers_map = {}
+        while True:
+            line = await stream.read_until(b"\r\n", max_length=self.max_line_size + 2)
+            if line == b"\r\n":
+                break
+            try:
+                name, value = _split_header_line(line[:-2])
+            except HTTPProtocolError as exc:
+                stream.close()
+                raise SSEProtocolError(str(exc))
+            headers_map[name.lower()] = value
+
+        if status_code != 200:
+            stream.close()
+            raise SSEProtocolError("SSE endpoint returned HTTP {}.".format(status_code))
+
+        content_type = headers_map.get("content-type", "").lower()
+        if "text/event-stream" not in content_type:
+            stream.close()
+            raise SSEProtocolError("SSE endpoint did not return text/event-stream.")
+
+        self.stream = stream
+        self.connected = True
+        self._reset_event_state()
+        return self
+
+    def _reset_event_state(self):
+        self._event_state = {
+            "event": None,
+            "id": None,
+            "retry": None,
+            "data_lines": [],
+            "data_size": 0,
+        }
+
+    def _append_data_line(self, value):
+        data_len = len(value.encode("utf-8"))
+        projected = self._event_state["data_size"] + data_len
+        if self._event_state["data_lines"]:
+            projected += 1
+        if self.max_event_size and projected > self.max_event_size:
+            raise SSEProtocolError(
+                "SSE event data exceeded max_event_size ({}).".format(self.max_event_size)
+            )
+        self._event_state["data_lines"].append(value)
+        self._event_state["data_size"] = projected
+
+    def _dispatch_event(self):
+        if self._event_state["event"] is None and not self._event_state["data_lines"] and self._event_state["id"] is None:
+            return None
+
+        event = {
+            "event": self._event_state["event"] or "message",
+            "data": "\n".join(self._event_state["data_lines"]),
+            "id": self._event_state["id"],
+        }
+        if self._event_state["retry"] is not None:
+            event["retry"] = self._event_state["retry"]
+        self._reset_event_state()
+        return event
+
+    async def read_event(self):
+        """Read and return the next SSE event."""
+        if not self.connected or self.stream is None:
+            raise RuntimeError("SSE stream is not connected. Call connect() first.")
+
+        while True:
+            raw_line = await self.stream.read_until(b"\n", max_length=self.max_line_size)
+            line = raw_line.decode("utf-8", errors="replace").rstrip("\n")
+            if line.endswith("\r"):
+                line = line[:-1]
+
+            if line == "":
+                event = self._dispatch_event()
+                if event is not None:
+                    return event
+                continue
+
+            if line.startswith(":"):
+                continue
+
+            if ":" in line:
+                field, value = line.split(":", 1)
+                if value.startswith(" "):
+                    value = value[1:]
+            else:
+                field, value = line, ""
+
+            if field == "data":
+                self._append_data_line(value)
+            elif field == "event":
+                self._event_state["event"] = value
+            elif field == "id":
+                if "\x00" not in value:
+                    self._event_state["id"] = value
+            elif field == "retry":
+                if value.isdigit():
+                    self._event_state["retry"] = int(value)
+
+    def close(self):
+        """Close the SSE stream immediately."""
+        if self.stream is not None:
+            self.stream.close()
+        self.stream = None
+        self.connected = False
+        self._event_state = None

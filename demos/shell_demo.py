@@ -3,7 +3,7 @@
 from common import build_runtime
 
 from SmallPackage import SmallTask, Unix
-from shells import BaseShell
+from SmallPackage.shells import BaseShell
 
 
 async def background_worker(task):
