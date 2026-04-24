@@ -339,6 +339,139 @@ class TestRuntime(unittest.TestCase):
 
         self.assertTrue(parent_task.result)
 
+    def test_error_handler_receives_uncaught_task_failure(self):
+        events = []
+        kernel = FakeKernel()
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
+
+        async def boom(task):
+            raise RuntimeError("boom")
+
+        root = SmallTask(2, boom, name="boom")
+        runtime.fork([root])
+        runtime.startOS()
+
+        self.assertEqual(1, len(events))
+        event = events[0]
+        self.assertEqual(root.getID(), event["task_id"])
+        self.assertEqual("boom", event["task_name"])
+        self.assertIsNone(event["parent_id"])
+        self.assertEqual("RuntimeError", event["exception_type"])
+        self.assertEqual("RuntimeError('boom')", event["exception_repr"])
+        self.assertFalse(event["is_cancelled"])
+        self.assertIsNone(event["blocked_reason"])
+        self.assertIsNone(event["waiting_signal"])
+        self.assertIsNone(event["io_wait_mode"])
+        self.assertIsNone(event["join_target_id"])
+        self.assertEqual([], event["join_pending_ids"])
+        self.assertIsInstance(event["exception"], RuntimeError)
+        self.assertIn("RuntimeError: boom", event["traceback_text"])
+
+    def test_error_handler_ignores_successful_completion(self):
+        events = []
+        kernel = FakeKernel()
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
+
+        async def worker(task):
+            await task.sleep(0.1)
+            return "ok"
+
+        root = SmallTask(2, worker, name="worker")
+        runtime.fork([root])
+        runtime.startOS()
+
+        self.assertEqual("ok", root.result)
+        self.assertEqual([], events)
+
+    def test_error_handler_ignores_cancelled_tasks_by_default(self):
+        events = []
+        kernel = FakeKernel()
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
+
+        async def signal_waiter(task):
+            await task.wait_signal(9)
+            return "unexpected"
+
+        async def killer(task, target):
+            await task.sleep(0.2)
+            target.kill()
+            return "killed"
+
+        async def parent(task):
+            waiter = task.spawn(signal_waiter, priority=3, name="signal_waiter")
+            task.spawn(killer, priority=1, name="killer", args=(waiter,))
+            await task.sleep(0.5)
+            return isinstance(waiter.exception, TaskCancelledError)
+
+        parent_task = SmallTask(2, parent, name="parent")
+        runtime.fork([parent_task])
+        runtime.startOS()
+
+        self.assertTrue(parent_task.result)
+        self.assertEqual([], events)
+
+    def test_error_handler_can_include_cancelled_tasks_with_pre_finalize_snapshot(self):
+        events = []
+        captured = {}
+        kernel = FakeKernel()
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append, include_cancelled=True)
+
+        async def signal_waiter(task):
+            await task.wait_signal(9)
+            return "unexpected"
+
+        async def killer(task, target):
+            await task.sleep(0.2)
+            target.kill()
+            return "killed"
+
+        async def parent(task):
+            waiter = task.spawn(signal_waiter, priority=3, name="signal_waiter")
+            captured["waiter"] = waiter
+            task.spawn(killer, priority=1, name="killer", args=(waiter,))
+            await task.sleep(0.5)
+            return "done"
+
+        parent_task = SmallTask(2, parent, name="parent")
+        runtime.fork([parent_task])
+        runtime.startOS()
+
+        waiter = captured["waiter"]
+        self.assertEqual("done", parent_task.result)
+        self.assertEqual(1, len(events))
+        event = events[0]
+        self.assertEqual(waiter.getID(), event["task_id"])
+        self.assertTrue(event["is_cancelled"])
+        self.assertEqual("TaskCancelledError", event["exception_type"])
+        self.assertEqual("signal", event["blocked_reason"])
+        self.assertEqual(9, event["waiting_signal"])
+        self.assertIsNone(event["io_wait_mode"])
+        self.assertIsNone(waiter._blocked_reason)
+        self.assertIsNone(waiter._waiting_signal)
+
+    def test_error_handler_failure_is_reported_without_crashing_runtime(self):
+        calls = []
+        kernel = FakeKernel()
+
+        def broken_handler(event):
+            calls.append(event["task_id"])
+            raise RuntimeError("handler boom")
+
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(broken_handler)
+
+        async def boom(task):
+            raise ValueError("task boom")
+
+        root = SmallTask(2, boom, name="boom")
+        runtime.fork([root])
+        runtime.startOS()
+
+        self.assertEqual([root.getID()], calls)
+        self.assertIsInstance(root.exception, ValueError)
+        self.assertTrue(
+            any("smallOS error handler failed:" in message for message in kernel.output)
+        )
+
     def test_invalid_io_wait_object_resumes_waiter_with_error(self):
         closed_obj = ClosedWaitObject()
         kernel = StrictWaitKernel()
@@ -376,6 +509,27 @@ class TestRuntime(unittest.TestCase):
         self.assertIsNone(waiter_task._io_wait_mode)
         self.assertIsNone(waiter_task._blocked_reason)
         self.assertNotIn(closed_obj, runtime.ioReadWaiters)
+
+    def test_error_handler_receives_invalid_io_failure(self):
+        events = []
+        closed_obj = ClosedWaitObject()
+        kernel = StrictWaitKernel()
+        runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
+
+        async def waiter(task, watched):
+            await task.wait_readable(watched)
+            return "unexpected"
+
+        waiter_task = SmallTask(2, waiter, name="waiter", args=(closed_obj,))
+        runtime.fork([waiter_task])
+        runtime.startOS()
+
+        self.assertEqual(1, len(events))
+        event = events[0]
+        self.assertEqual(waiter_task.getID(), event["task_id"])
+        self.assertEqual("ValueError", event["exception_type"])
+        self.assertIn("invalid file descriptor (-1)", event["exception_repr"])
+        self.assertIn("invalid file descriptor (-1)", event["traceback_text"])
 
 
 if __name__ == "__main__":
