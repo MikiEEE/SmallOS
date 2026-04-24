@@ -15,7 +15,7 @@ from .awaitables import TaskInstruction
 from .SmallIO import SmallIO
 from .SmallConfig import SmallOSConfig
 from .OSlist import OSList
-from .SmallErrors import MaxProcessError, UnsupportedAwaitableError
+from .SmallErrors import MaxProcessError, TaskCancelledError, UnsupportedAwaitableError
 
 
 _MISSING = object()
@@ -63,6 +63,8 @@ class SmallOS(SmallIO):
         self.kernel = None
         self.eternalWatchers = self.config.eternal_watchers
         self.cursor = None
+        self.errorHandler = None
+        self.errorHandlerIncludeCancelled = False
 
         SmallIO.__init__(self, self.config.io_buffer_length)
         if kwargs:
@@ -144,6 +146,20 @@ class SmallOS(SmallIO):
     def setEternalWatchers(self, isEternalWatcherPresent):
         """Control whether the runtime exits once only watcher tasks remain."""
         self.eternalWatchers = isEternalWatcherPresent
+        return self
+
+    def setErrorHandler(self, handler, include_cancelled=False):
+        """
+        Install a best-effort runtime error observer for failed tasks.
+
+        ``handler`` is a synchronous callable that receives one failure-event
+        dictionary after the task has been finalized. Returning ``None`` removes
+        the current handler.
+        """
+        if handler is not None and not callable(handler):
+            raise TypeError("error handler must be callable or None.")
+        self.errorHandler = handler
+        self.errorHandlerIncludeCancelled = bool(include_cancelled)
         return self
 
     def _wake_sleeping_tasks(self):
@@ -499,6 +515,85 @@ class SmallOS(SmallIO):
             if not waiters and task._io_wait_obj in waiters_map:
                 del waiters_map[task._io_wait_obj]
 
+    def _should_dispatch_failure(self, task):
+        """Return whether ``task`` should produce a runtime failure event."""
+        exc = task.exception
+        if exc is None:
+            return False
+        if isinstance(exc, TaskCancelledError) and not self.errorHandlerIncludeCancelled:
+            return False
+        return True
+
+    def _snapshot_task_id(self, task):
+        """Return a task or PID reference as a PID integer when possible."""
+        if task is None or task == -1:
+            return None
+        if hasattr(task, "getID"):
+            return task.getID()
+        if isinstance(task, int):
+            return task
+        return None
+
+    def _format_exception_traceback(self, exc):
+        """Return a best-effort formatted traceback string for ``exc``."""
+        try:
+            import traceback
+        except ImportError:
+            return None
+
+        try:
+            return "".join(
+                traceback.format_exception(type(exc), exc, getattr(exc, "__traceback__", None))
+            )
+        except Exception:
+            try:
+                return "".join(traceback.format_exception_only(type(exc), exc))
+            except Exception:
+                return None
+
+    def _build_failure_event(self, task):
+        """Snapshot the task failure context before finalization clears wait state."""
+        exc = task.exception
+        return {
+            "task_id": task.getID(),
+            "task_name": task.name,
+            "parent_id": self._snapshot_task_id(task.parent),
+            "exception": exc,
+            "exception_type": type(exc).__name__ if exc is not None else None,
+            "exception_repr": repr(exc),
+            "is_cancelled": isinstance(exc, TaskCancelledError),
+            "blocked_reason": task._blocked_reason,
+            "waiting_signal": task._waiting_signal,
+            "io_wait_mode": task._io_wait_mode,
+            "join_target_id": self._snapshot_task_id(task._join_target),
+            "join_pending_ids": sorted(task._join_pending) if task._join_pending else [],
+            "traceback_text": self._format_exception_traceback(exc),
+        }
+
+    def _write_runtime_diagnostic(self, message):
+        """Write a best-effort runtime diagnostic without crashing the scheduler."""
+        if not message:
+            return
+        if not message.endswith("\n"):
+            message += "\n"
+        try:
+            if self.kernel and hasattr(self.kernel, "write"):
+                self.kernel.write(message)
+        except Exception:
+            return
+
+    def _dispatch_error_handler(self, event):
+        """Invoke the installed runtime error handler without surfacing its failures."""
+        if self.errorHandler is None:
+            return
+        try:
+            self.errorHandler(event)
+        except Exception as exc:
+            diagnostic = self._format_exception_traceback(exc) or repr(exc)
+            self._write_runtime_diagnostic(
+                "smallOS error handler failed: {}".format(diagnostic.rstrip("\n"))
+            )
+
     def _detach_from_parent(self, task):
         """Remove a finished child PID from its parent's child list."""
         parent = task.parent
@@ -542,10 +637,15 @@ class SmallOS(SmallIO):
 
     def _finalize_task(self, task):
         """Run the full shutdown sequence for a finished or cancelled task."""
+        failure_event = None
+        if self._should_dispatch_failure(task):
+            failure_event = self._build_failure_event(task)
         self._clear_wait_state(task)
         self._notify_waiters(task)
         self._detach_from_parent(task)
         self.tasks.delete(task.getID())
+        if failure_event is not None:
+            self._dispatch_error_handler(failure_event)
 
     def cancel_task(self, task, recursive=False):
         """Cancel a task by object or PID and optionally cancel its descendants."""
