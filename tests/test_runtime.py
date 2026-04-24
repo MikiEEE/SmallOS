@@ -88,6 +88,7 @@ class TestRuntime(unittest.TestCase):
         return runtime, kernel
 
     def test_priority_order_is_preserved_before_and_after_sleep(self):
+        """Higher-priority tasks should run first both before and after sleeping."""
         events = []
 
         async def worker(task):
@@ -107,6 +108,7 @@ class TestRuntime(unittest.TestCase):
         )
 
     def test_join_all_returns_results_in_requested_order(self):
+        """join_all should preserve the caller-specified child ordering."""
         async def child(task, value, delay):
             await task.sleep(delay)
             return value
@@ -122,6 +124,7 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual(["first", "second"], parent_task.result)
 
     def test_wait_signal_and_join_resume_once(self):
+        """A signal wait followed by join should resume exactly once per event."""
         async def sender(task):
             await task.sleep(0.2)
             task.sendSignal(task.parent.pid, 7)
@@ -139,6 +142,7 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual((7, "sent"), parent_task.result)
 
     def test_killing_joined_child_raises_into_waiter(self):
+        """Cancelling a joined child should raise TaskCancelledError into the waiter."""
         async def sleeper(task):
             await task.sleep(10)
             return "too late"
@@ -163,6 +167,7 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual("caught-cancel", parent_task.result)
 
     def test_wait_readable_resumes_on_kernel_io_event(self):
+        """A task waiting on readability should resume when the kernel marks it ready."""
         io_obj = object()
 
         async def notifier(task, watched):
@@ -181,6 +186,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(waiter_task.result)
 
     def test_killing_io_waiter_clears_wait_registration(self):
+        """Cancelling an I/O waiter should remove it from the runtime waiter map."""
         io_obj = object()
 
         async def io_waiter(task, watched):
@@ -203,6 +209,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(parent_task.result)
 
     def test_cancelling_signal_waiter_clears_wait_metadata(self):
+        """Cancelling a signal waiter should clear its signal-specific blocked metadata."""
         async def signal_waiter(task):
             await task.wait_signal(9)
             return "unexpected"
@@ -228,6 +235,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(parent_task.result)
 
     def test_cancelling_join_waiter_unregisters_child(self):
+        """Cancelling a join waiter should unregister it from the joined child."""
         async def sleeper(task):
             await task.sleep(1)
             return "done"
@@ -259,6 +267,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(parent_task.result)
 
     def test_cancelling_join_all_waiter_unregisters_children(self):
+        """Cancelling a join_all waiter should unregister it from every joined child."""
         async def sleeper(task):
             await task.sleep(1)
             return "done"
@@ -298,6 +307,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(parent_task.result)
 
     def test_resuming_task_clears_previous_wait_metadata_before_next_wait(self):
+        """Resuming from one wait should clear old wait metadata before the next wait."""
         io_obj = object()
 
         async def waiter_task(task, watched):
@@ -340,6 +350,7 @@ class TestRuntime(unittest.TestCase):
         self.assertTrue(parent_task.result)
 
     def test_error_handler_receives_uncaught_task_failure(self):
+        """The runtime error handler should receive uncaught task failures once."""
         events = []
         kernel = FakeKernel()
         runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
@@ -368,6 +379,7 @@ class TestRuntime(unittest.TestCase):
         self.assertIn("RuntimeError: boom", event["traceback_text"])
 
     def test_error_handler_ignores_successful_completion(self):
+        """Successful task completion should not trigger the runtime error handler."""
         events = []
         kernel = FakeKernel()
         runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
@@ -384,6 +396,7 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual([], events)
 
     def test_error_handler_ignores_cancelled_tasks_by_default(self):
+        """TaskCancelledError should be ignored by the handler unless explicitly included."""
         events = []
         kernel = FakeKernel()
         runtime = SmallOS().setKernel(kernel).setErrorHandler(events.append)
@@ -411,6 +424,7 @@ class TestRuntime(unittest.TestCase):
         self.assertEqual([], events)
 
     def test_error_handler_can_include_cancelled_tasks_with_pre_finalize_snapshot(self):
+        """The handler can opt into cancellations and still see pre-finalize wait context."""
         events = []
         captured = {}
         kernel = FakeKernel()
@@ -450,6 +464,7 @@ class TestRuntime(unittest.TestCase):
         self.assertIsNone(waiter._waiting_signal)
 
     def test_error_handler_failure_is_reported_without_crashing_runtime(self):
+        """Failures inside the runtime error handler should be downgraded to diagnostics."""
         calls = []
         kernel = FakeKernel()
 
@@ -473,6 +488,7 @@ class TestRuntime(unittest.TestCase):
         )
 
     def test_invalid_io_wait_object_resumes_waiter_with_error(self):
+        """An invalid I/O wait object should resume the waiter with a clean exception."""
         closed_obj = ClosedWaitObject()
         kernel = StrictWaitKernel()
         runtime = SmallOS().setKernel(kernel)
@@ -492,6 +508,7 @@ class TestRuntime(unittest.TestCase):
         self.assertNotIn(closed_obj, runtime.ioReadWaiters)
 
     def test_uncaught_invalid_io_wait_error_clears_wait_state(self):
+        """An uncaught invalid-I/O failure should still clear runtime wait bookkeeping."""
         closed_obj = ClosedWaitObject()
         kernel = StrictWaitKernel()
         runtime = SmallOS().setKernel(kernel)
@@ -511,6 +528,7 @@ class TestRuntime(unittest.TestCase):
         self.assertNotIn(closed_obj, runtime.ioReadWaiters)
 
     def test_error_handler_receives_invalid_io_failure(self):
+        """Invalid-I/O task failures should also be delivered through the error handler."""
         events = []
         closed_obj = ClosedWaitObject()
         kernel = StrictWaitKernel()
