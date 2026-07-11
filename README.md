@@ -108,10 +108,10 @@ Build the wheel and source distribution:
 python -m build
 ```
 
-The GitHub Actions pipeline runs five gates: documentation-index validation,
-Pyright, unit tests across Python 3.10–3.13, branch coverage with a 60% floor,
-and distribution verification. Packaging runs only after the earlier gates
-pass, installs the built wheel, and smoke-tests it outside the source checkout.
+The GitHub Actions pipeline runs four gates: Pyright, unit tests across Python
+3.10–3.13, branch coverage with a 60% floor, and distribution verification.
+Packaging runs only after the earlier gates pass, installs the built wheel,
+and smoke-tests it outside the source checkout.
 
 The package ships a `py.typed` marker. Type coverage is being tightened by
 subsystem: configuration, awaitables, task lifecycle, scheduling, signals,
