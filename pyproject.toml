@@ -26,6 +26,7 @@ classifiers = [
 [project.optional-dependencies]
 dev = [
     "build>=1.2",
+    "coverage>=7.6",
     "pyright>=1.1.390",
 ]
 
@@ -50,8 +51,6 @@ typeCheckingMode = "basic"
 include = ["SmallPackage", "demos"]
 exclude = ["build", "dist"]
 ignore = [
-    "SmallPackage/Kernel.py",
-    "SmallPackage/SmallSignals.py",
     "SmallPackage/clients",
     "SmallPackage/shells.py",
     "demos",
@@ -62,3 +61,15 @@ reportUnknownArgumentType = false
 reportUnknownVariableType = false
 reportUnknownLambdaType = false
 reportMissingImports = false
+
+[tool.coverage.run]
+branch = true
+source = ["SmallPackage"]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+skip_covered = true
+
+[tool.coverage.xml]
+output = "coverage.xml"
