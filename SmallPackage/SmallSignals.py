@@ -7,6 +7,22 @@ their own; they only record signal state and return smallOS-owned awaitables.
 ``SmallOS`` later interprets those awaitables and moves tasks between queues.
 """
 
+from __future__ import annotations
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover - exercised on constrained runtimes
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing import Any, ClassVar, cast
+
+    from .SmallOS import SmallOS
+    from .SmallTask import SmallTask
+    from .TaskState import TaskState
+    from .awaitables import _InstructionAwaitable
+
 from .awaitables import (
     sleep_instruction,
     wait_readable_instruction,
@@ -31,15 +47,19 @@ class SmallSignals:
       and app code should use named constants instead of bare integers.
     """
 
-    SIGNAL_CAPACITY = 32
-    CORE_SIGNAL_MEANINGS = {}
-    LEGACY_SIGNAL_MEANINGS = {
+    SIGNAL_CAPACITY: ClassVar[int] = 32
+    CORE_SIGNAL_MEANINGS: ClassVar[dict[int, str]] = {}
+    LEGACY_SIGNAL_MEANINGS: ClassVar[dict[int, str]] = {
         5: "Legacy waitOnAsync parent-wait signal from the pre-native-async runtime.",
         6: "Legacy waitOnAsync child-complete signal from the pre-native-async runtime.",
         7: "Legacy waitOnAsync all-children-complete signal from the pre-native-async runtime.",
     }
 
-    def __init__(self, OS, kwargs):
+    if TYPE_CHECKING:
+        OS: SmallOS | None
+        state: TaskState
+
+    def __init__(self, OS: SmallOS | None, kwargs: dict[str, Any]) -> None:
         """
         Initialize per-task signal state.
 
@@ -52,14 +72,14 @@ class SmallSignals:
         self.wakeSigs = []
         self.sleepTime = 0
         self.timeOfSleep = 0
-        self.handlers = None
+        self.handlers: Callable[[SmallSignals], Any] | None = None
 
         super().__init__()
 
         if kwargs and kwargs.get("handlers", False):
             self.handlers = kwargs["handlers"]
 
-    def getSignals(self):
+    def getSignals(self) -> list[int]:
         """Return the list of currently latched signal numbers."""
         received = []
         for num, sig in enumerate(self.signals):
@@ -68,7 +88,7 @@ class SmallSignals:
         return received
 
     @classmethod
-    def describeSignal(cls, sig):
+    def describeSignal(cls, sig: int) -> str:
         """
         Return the documented meaning of a signal slot.
 
@@ -82,7 +102,7 @@ class SmallSignals:
             return cls.LEGACY_SIGNAL_MEANINGS[sig] + " Not used by the current runtime."
         return "Application-defined signal slot."
 
-    def sendSignal(self, pid, sig):
+    def sendSignal(self, pid: int, sig: int) -> int:
         """
         Deliver a signal to another task by PID.
 
@@ -102,7 +122,7 @@ class SmallSignals:
         task.acceptSignal(sig)
         return 0
 
-    def acceptSignal(self, sig):
+    def acceptSignal(self, sig: int) -> int:
         """
         Latch an incoming signal and notify the scheduler.
 
@@ -114,13 +134,16 @@ class SmallSignals:
 
         self.signals[sig] = 1
         if self.OS:
-            self.OS.on_signal(self, sig)
+            task = cast("SmallTask", self) if TYPE_CHECKING else self
+            self.OS.on_signal(task, sig)
 
         if self.handlers:
             self.handlers(self)
         return 0
 
-    def sleep(self, secs, state_blob=None):
+    def sleep(
+        self, secs: float, state_blob: dict[Any, Any] | None = None
+    ) -> _InstructionAwaitable[None]:
         """
         Return the awaitable used for cooperative sleeping.
 
@@ -131,35 +154,40 @@ class SmallSignals:
             self.state.update(state_blob)
         return sleep_instruction(secs)
 
-    def wait_signal(self, sig, state_blob=None):
+    def wait_signal(
+        self, sig: int, state_blob: dict[Any, Any] | None = None
+    ) -> _InstructionAwaitable[int]:
         """Return the awaitable used to wait until ``sig`` is delivered."""
         if state_blob is not None:
             self.state.update(state_blob)
         return wait_signal_instruction(sig)
 
-    def sigSuspendV2(self, sig, state_blob=None):
+    def sigSuspendV2(
+        self, sig: int, state_blob: dict[Any, Any] | None = None
+    ) -> _InstructionAwaitable[int]:
         """Compatibility alias for the older generator-era suspension name."""
         return self.wait_signal(sig, state_blob)
 
-    def yield_now(self):
+    def yield_now(self) -> _InstructionAwaitable[None]:
         """Return the awaitable used for an explicit cooperative yield."""
         return yield_now_instruction()
 
-    def wait_readable(self, io_obj):
+    def wait_readable(self, io_obj: Any) -> _InstructionAwaitable[Any]:
         """Return the awaitable used to wait until ``io_obj`` is readable."""
         return wait_readable_instruction(io_obj)
 
-    def wait_writable(self, io_obj):
+    def wait_writable(self, io_obj: Any) -> _InstructionAwaitable[Any]:
         """Return the awaitable used to wait until ``io_obj`` is writable."""
         return wait_writable_instruction(io_obj)
 
-    def wake(self):
+    def wake(self) -> None:
         """Force the task back onto the ready queue if it belongs to an OS."""
         if self.OS:
-            self.OS.resume_task(self)
+            task = cast("SmallTask", self) if TYPE_CHECKING else self
+            self.OS.resume_task(task)
         return
 
-    def checkSignal(self, sig):
+    def checkSignal(self, sig: int) -> bool:
         """
         Consume and clear a previously received signal if it exists.
 

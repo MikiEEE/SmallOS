@@ -89,6 +89,13 @@ Run the test suite:
 python3 -m unittest discover -s tests -v
 ```
 
+Run the tests with the same branch-coverage gate used by CI:
+
+```bash
+coverage run -m unittest discover -s tests -v
+coverage report
+```
+
 Run the static type checker:
 
 ```bash
@@ -101,10 +108,15 @@ Build the wheel and source distribution:
 python -m build
 ```
 
+The GitHub Actions pipeline runs five gates: documentation-index validation,
+Pyright, unit tests across Python 3.10–3.13, branch coverage with a 60% floor,
+and distribution verification. Packaging runs only after the earlier gates
+pass, installs the built wheel, and smoke-tests it outside the source checkout.
+
 The package ships a `py.typed` marker. Type coverage is being tightened by
-subsystem: configuration, awaitables, task lifecycle, scheduling, and core
-utilities form the first checked boundary, while platform and protocol-client
-implementations remain on the incremental typing backlog.
+subsystem: configuration, awaitables, task lifecycle, scheduling, signals,
+platform kernels, and core utilities form the current checked boundary, while
+protocol clients, shells, and demos remain on the incremental typing backlog.
 
 ## Quick Start
 

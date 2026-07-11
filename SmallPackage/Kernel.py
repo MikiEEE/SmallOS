@@ -14,11 +14,22 @@ They only provide capability hints and convenience configuration around the
 shared MicroPython transport/time API.
 """
 
+from __future__ import annotations
+
+try:
+	from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover - exercised on constrained runtimes
+	TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+	from collections.abc import Iterable, Mapping, Sequence
+	from typing import Any
+
 
 _UNSET = object()
 
 
-def _import_first(*module_names):
+def _import_first(*module_names: str) -> Any | None:
 	"""
 	Import the first available module name from a list.
 
@@ -35,7 +46,7 @@ def _import_first(*module_names):
 	return None
 
 
-def _portable_shell_split(line):
+def _portable_shell_split(line: str) -> list[str]:
 	"""
 	Tokenize one shell command line without relying on desktop-only helpers.
 
@@ -90,7 +101,7 @@ def _portable_shell_split(line):
 	return tokens
 
 
-def detect_micropython_machine_name(sys_mod=None, os_mod=None):
+def detect_micropython_machine_name(sys_mod: Any = None, os_mod: Any = None) -> str:
 	"""
 	Best-effort lookup of the active board/firmware machine name.
 
@@ -122,7 +133,9 @@ def detect_micropython_machine_name(sys_mod=None, os_mod=None):
 	return ''
 
 
-def build_micropython_kernel(machine_name=None, **kwargs):
+def build_micropython_kernel(
+	machine_name: str | None = None, **kwargs: Any
+) -> MicroPythonKernel:
 	"""
 	Return the best built-in MicroPython kernel profile for the current board.
 
@@ -157,14 +170,14 @@ class Kernel:
 	requiring protocol-specific kernel methods.
 	'''
 
-	def __init__(self):
+	def __init__(self) -> None:
 		self._scheduler_anchor_tick = None
 		self._scheduler_elapsed_ms = 0
 
-	def write(self, msg):
+	def write(self, msg: str) -> None:
 		pass
 
-	def shell_split(self, line):
+	def shell_split(self, line: str) -> list[str]:
 		"""
 		Tokenize one shell command line.
 
@@ -174,22 +187,22 @@ class Kernel:
 		"""
 		return _portable_shell_split(line)
 
-	def time_epoch(self):
-		pass
+	def time_epoch(self) -> float:
+		raise NotImplementedError
 
-	def ticks_ms(self):
-		pass
+	def ticks_ms(self) -> int:
+		raise NotImplementedError
 
-	def ticks_add(self, base, delta_ms):
+	def ticks_add(self, base: int, delta_ms: int) -> int:
 		return base + delta_ms
 
-	def ticks_diff(self, end, start):
+	def ticks_diff(self, end: int, start: int) -> int:
 		return end - start
 
-	def time_monotonic(self):
+	def time_monotonic(self) -> float:
 		return self.scheduler_now_ms() / 1000
 
-	def scheduler_now_ms(self):
+	def scheduler_now_ms(self) -> int:
 		'''
 		Returns a non-decreasing scheduler clock in milliseconds.
 
@@ -208,17 +221,24 @@ class Kernel:
 		self._scheduler_anchor_tick = current
 		return self._scheduler_elapsed_ms
 
-	def sleep(self, secs):
+	def sleep(self, secs: float) -> None:
 		self.sleep_ms(int(max(0, secs) * 1000))
 		return
 
-	def sleep_ms(self, delay_ms):
+	def sleep_ms(self, delay_ms: int) -> None:
 		pass
 
-	def io_wait(self, readables, writables, timeout_ms=None):
+	def io_wait(
+		self,
+		readables: Iterable[Any],
+		writables: Iterable[Any],
+		timeout_ms: int | None = None,
+	) -> tuple[list[Any], list[Any]]:
 		return [], []
 
-	def validate_io_wait_object(self, obj):
+	def validate_io_wait_object(
+		self, obj: Any
+	) -> tuple[bool, BaseException | None]:
 		"""
 		Return whether ``obj`` still looks safe to hand to poll/select.
 
@@ -245,28 +265,28 @@ class Kernel:
 				)
 		return True, None
 
-	def resolve_address(self, host, port):
+	def resolve_address(self, host: str, port: int) -> Any:
 		return None
 
-	def socket_open(self, address_info):
+	def socket_open(self, address_info: Any) -> Any:
 		return None
 
-	def socket_setblocking(self, sock, flag):
+	def socket_setblocking(self, sock: Any, flag: bool) -> None:
 		return
 
-	def socket_connect(self, sock, sockaddr):
+	def socket_connect(self, sock: Any, sockaddr: Any) -> bool:
 		return True
 
-	def socket_connection_error(self, sock):
+	def socket_connection_error(self, sock: Any) -> int:
 		return 0
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: bytes) -> int:
 		return 0
 
-	def socket_recv(self, sock, buffer_size):
+	def socket_recv(self, sock: Any, buffer_size: int) -> bytes:
 		return b''
 
-	def socket_close(self, sock):
+	def socket_close(self, sock: Any) -> None:
 		return
 
 	def socket_wrap_tls_client(
@@ -280,10 +300,10 @@ class Kernel:
 	):
 		return sock
 
-	def socket_do_handshake(self, sock):
+	def socket_do_handshake(self, sock: Any) -> None:
 		return
 
-	def _extract_errno(self, exc):
+	def _extract_errno(self, exc: BaseException) -> int | None:
 		errno_value = getattr(exc, 'errno', None)
 		if errno_value is not None:
 			return errno_value
@@ -291,13 +311,13 @@ class Kernel:
 			return exc.args[0]
 		return None
 
-	def socket_needs_read(self, exc):
+	def socket_needs_read(self, exc: BaseException) -> bool:
 		return isinstance(exc, BlockingIOError)
 
-	def socket_needs_write(self, exc):
+	def socket_needs_write(self, exc: BaseException) -> bool:
 		return False
 
-	def _poll_lookup_key(self, obj):
+	def _poll_lookup_key(self, obj: Any) -> Any:
 		"""
 		Return the identity key used to map poll events back to registered objects.
 
@@ -506,9 +526,15 @@ class MicroPythonKernel(Kernel):
 
 		modules = modules or {}
 
-		self._time = modules.get('time') or _import_first('time', 'utime')
+		time_mod = modules.get('time') or _import_first('time', 'utime')
+		if time_mod is None:
+			raise ImportError('MicroPythonKernel requires time or utime.')
+		self._time = time_mod
 		self._select = modules.get('select') or _import_first('select', 'uselect')
-		self._socket = modules.get('socket') or _import_first('socket', 'usocket')
+		socket_mod = modules.get('socket') or _import_first('socket', 'usocket')
+		if socket_mod is None:
+			raise ImportError('MicroPythonKernel requires socket or usocket.')
+		self._socket = socket_mod
 		self._ssl = modules.get('ssl')
 		if self._ssl is None:
 			self._ssl = _import_first('ssl', 'ussl')
@@ -680,6 +706,8 @@ class MicroPythonKernel(Kernel):
 			except TypeError as exc:
 				last_error = exc
 		else:
+			if last_error is None:
+				raise RuntimeError('TLS wrapper did not produce a socket.')
 			raise last_error
 		if hasattr(wrapped, 'setblocking'):
 			wrapped.setblocking(False)
@@ -694,12 +722,14 @@ class MicroPythonKernel(Kernel):
 		err = self._extract_errno(exc)
 		if err in {11, 115}:
 			return True
-		if self._ssl and hasattr(self._ssl, 'SSLWantReadError') and isinstance(exc, self._ssl.SSLWantReadError):
+		want_read_error = getattr(self._ssl, 'SSLWantReadError', None)
+		if isinstance(want_read_error, type) and isinstance(exc, want_read_error):
 			return True
 		return isinstance(exc, BlockingIOError)
 
 	def socket_needs_write(self, exc):
-		if self._ssl and hasattr(self._ssl, 'SSLWantWriteError') and isinstance(exc, self._ssl.SSLWantWriteError):
+		want_write_error = getattr(self._ssl, 'SSLWantWriteError', None)
+		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
 			return True
 		return False
 
