@@ -7,7 +7,19 @@ those app messages are buffered so shell output can stay readable. Switching
 back to app view flushes the buffered output in order.
 """
 
+from __future__ import annotations
+
 from collections import deque
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from ._types import TerminalStatus
 
 
 class SmallIO:
@@ -22,25 +34,26 @@ class SmallIO:
     - flush buffered output
     """
 
-    def __init__(self, buffer_length):
+    def __init__(self, buffer_length: int) -> None:
         """Set up the shell/app terminal split plus the app output buffer."""
+        self.kernel: Any = None
         self.terminalToggle = False
         self.buffer_length = max(0, int(buffer_length))
         self.appPrintQueue = deque(maxlen=self.buffer_length) if self.buffer_length else deque()
         return
 
-    def _coerce_message(self, *args):
+    def _coerce_message(self, *args: object) -> str:
         """Join arbitrary print arguments into one text payload."""
         return "".join(str(arg) for arg in args)
 
-    def _write_direct(self, msg):
+    def _write_direct(self, msg: str) -> bool:
         """Write straight to the active kernel when one is attached."""
         if not getattr(self, "kernel", None):
             return False
         self.kernel.write(msg)
         return True
 
-    def print(self, *args):
+    def print(self, *args: object) -> None:
         """
         Write application output.
 
@@ -57,7 +70,7 @@ class SmallIO:
             self.appPrintQueue.append(msg)
         return
 
-    def sPrint(self, *args, force=False):
+    def sPrint(self, *args: object, force: bool = False) -> None:
         """
         Write shell or OS output.
 
@@ -70,7 +83,7 @@ class SmallIO:
             self._write_direct(msg)
         return
 
-    def terminalStatus(self):
+    def terminalStatus(self) -> TerminalStatus:
         """Return a small snapshot of the terminal/buffer state."""
         return {
             "terminal_visible": bool(self.terminalToggle),
@@ -78,17 +91,17 @@ class SmallIO:
             "buffer_length": self.buffer_length,
         }
 
-    def getBufferedOutput(self):
+    def getBufferedOutput(self) -> list[str]:
         """Return a copy of the buffered app output."""
         return list(self.appPrintQueue)
 
-    def clearBufferedOutput(self):
+    def clearBufferedOutput(self) -> int:
         """Drop every buffered app message and return how many were removed."""
         removed = len(self.appPrintQueue)
         self.appPrintQueue.clear()
         return removed
 
-    def flushBufferedOutput(self):
+    def flushBufferedOutput(self) -> int:
         """Write all buffered app output immediately and return the flush count."""
         flushed = 0
         while self.appPrintQueue:
@@ -97,7 +110,7 @@ class SmallIO:
             flushed += 1
         return flushed
 
-    def setTerminalMode(self, enabled):
+    def setTerminalMode(self, enabled: bool) -> TerminalStatus:
         """Explicitly switch between shell view and app view."""
         enabled = bool(enabled)
         if self.terminalToggle == enabled:
@@ -109,6 +122,6 @@ class SmallIO:
             self.flushBufferedOutput()
         return self.terminalStatus()
 
-    def toggleTerminal(self):
+    def toggleTerminal(self) -> TerminalStatus:
         """Toggle between shell view and app view."""
         return self.setTerminalMode(not self.terminalToggle)

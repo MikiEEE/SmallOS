@@ -1,4 +1,14 @@
+from __future__ import annotations
+
 import copy
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Any
 
 
 '''
@@ -6,20 +16,20 @@ File Deprecated as of concurrency branch update.
 '''
 
 
-class TaskState():
+class TaskState:
 
     '''
     @class taskState - state management class for keeping track of 
         system stats and data of task. 
     '''
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._state = dict()
         self._state['system'] = dict()
         self._state['data'] = dict()
 
 
-    def update(self,dict_blob,namespace='data'):
+    def update(self, dict_blob: dict[Any, Any], namespace: str = 'data') -> None:
         '''
         @function updateState() - updates the contents of the
             state object. 
@@ -32,7 +42,7 @@ class TaskState():
         return
 
 
-    def isFree(self,key,namespace='data'):
+    def isFree(self, key: Any, namespace: str = 'data') -> bool:
         '''
         @function isFree() - checks to see if the key is free for 
             use in the state dict.
@@ -50,7 +60,7 @@ class TaskState():
             return True
 
 
-    def free(self,key,namespace='data'):
+    def free(self, key: Any, namespace: str = 'data') -> int:
         '''
         @function free() - Will free the selected key from the state.
         @param - key - key to be deleted. 
@@ -65,7 +75,7 @@ class TaskState():
             return -1 
 
 
-    def getState(self,key=None,namespace='data'):
+    def getState(self, key: Any = None, namespace: str = 'data') -> tuple[Any, int]:
         '''
             @function getState - can return the entire state or just one
                 element of the state returns a -1 if the requested key does not exist.
@@ -83,6 +93,3 @@ class TaskState():
             return copy.deepcopy(self._state[namespace][key]), 0
         else:
             return None, -1
-
-
-

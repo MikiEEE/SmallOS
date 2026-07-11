@@ -3,7 +3,9 @@
 @file linkedList - modules to create and manipulate doubly linked list. 
 '''
 
-def insertPrev(root, newNode):
+from __future__ import annotations
+
+def insertPrev(root: Node, newNode: Node) -> None:
     '''
     @function insertPrev() - takes in a rootNode and newNode and 
         inserts the newNode behind the rootNode.
@@ -24,7 +26,7 @@ def insertPrev(root, newNode):
     return 
 
 
-def insertNext(root,newNode):
+def insertNext(root: Node, newNode: Node) -> None:
     '''
     @function insertNext() - takes in a rootNode and newNode and 
         inserts the newNode infront of the rootNode.
@@ -45,7 +47,7 @@ def insertNext(root,newNode):
     return
 
 
-def removeNode(node):
+def removeNode(node: Node) -> None:
     '''
     @function removeNode() - Removes the Node() from the 
         doubly-linked-list
@@ -67,7 +69,7 @@ def removeNode(node):
 
 
 
-class Node():
+class Node:
     '''
     @class Node() - Holds no data on its own, 
         developed with the intent of being a super class
@@ -79,13 +81,11 @@ class Node():
         are not taken. 
         ***
     '''
-    next=None
-    prev=None
+    next: Node | None = None
+    prev: Node | None = None
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.next = None
         self.prev = None 
         return 
-
-
 
