@@ -7,6 +7,19 @@ to document, load from disk, and share between desktop and MicroPython entry
 points.
 """
 
+from __future__ import annotations
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover - exercised on constrained runtimes
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from os import PathLike
+    from typing import Any, Mapping
+
+    from ._types import SmallOSConfigData
+
 
 _DEFAULT_CLIENT_DEFAULTS = {
     "stream": {
@@ -64,12 +77,12 @@ class SmallOSConfig:
 
     def __init__(
         self,
-        task_capacity=2**10,
-        priority_levels=10,
-        io_buffer_length=1024,
-        eternal_watchers=False,
-        client_defaults=None,
-    ):
+        task_capacity: int = 2**10,
+        priority_levels: int = 10,
+        io_buffer_length: int = 1024,
+        eternal_watchers: bool = False,
+        client_defaults: Mapping[str, Mapping[str, int]] | None = None,
+    ) -> None:
         self.task_capacity = self._validate_positive_int("task_capacity", task_capacity)
         self.priority_levels = self._validate_positive_int("priority_levels", priority_levels)
         if self.priority_levels < 2:
@@ -79,7 +92,7 @@ class SmallOSConfig:
         self.client_defaults = self._normalize_client_defaults(client_defaults)
 
     @staticmethod
-    def _validate_positive_int(name, value):
+    def _validate_positive_int(name: str, value: int) -> int:
         if not isinstance(value, int):
             raise TypeError("{} must be an int.".format(name))
         if value <= 0:
@@ -87,7 +100,7 @@ class SmallOSConfig:
         return value
 
     @staticmethod
-    def _validate_non_negative_int(name, value):
+    def _validate_non_negative_int(name: str, value: int) -> int:
         if not isinstance(value, int):
             raise TypeError("{} must be an int.".format(name))
         if value < 0:
@@ -95,14 +108,16 @@ class SmallOSConfig:
         return value
 
     @classmethod
-    def _default_client_defaults(cls):
+    def _default_client_defaults(cls) -> dict[str, dict[str, int]]:
         defaults = {}
         for section, values in _DEFAULT_CLIENT_DEFAULTS.items():
             defaults[section] = dict(values)
         return defaults
 
     @classmethod
-    def _normalize_client_defaults(cls, client_defaults):
+    def _normalize_client_defaults(
+        cls, client_defaults: Mapping[str, Mapping[str, int]] | None
+    ) -> dict[str, dict[str, int]]:
         if client_defaults is None:
             return cls._default_client_defaults()
         if not isinstance(client_defaults, dict):
@@ -128,12 +143,14 @@ class SmallOSConfig:
         return normalized
 
     @classmethod
-    def default(cls):
+    def default(cls) -> SmallOSConfig:
         """Return a fresh config populated with the runtime defaults."""
         return cls()
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(
+        cls, data: SmallOSConfig | Mapping[str, Any] | None
+    ) -> SmallOSConfig:
         """Build a config from canonical keys or supported aliases."""
         if data is None:
             return cls()
@@ -151,19 +168,19 @@ class SmallOSConfig:
         )
 
     @classmethod
-    def from_json_file(cls, path):
+    def from_json_file(cls, path: str | PathLike[str]) -> SmallOSConfig:
         """Load a config from a JSON file on desktop Python or MicroPython."""
         json_mod = _import_json_module()
         with open(path, "r") as handle:
             return cls.from_dict(json_mod.load(handle))
 
-    def copy(self, **updates):
+    def copy(self, **updates: Any) -> SmallOSConfig:
         """Return a new config with a few fields replaced."""
-        data = self.to_dict()
+        data: dict[str, Any] = dict(self.to_dict())
         data.update(updates)
         return type(self).from_dict(data)
 
-    def to_dict(self):
+    def to_dict(self) -> SmallOSConfigData:
         """Return a plain-serializable dictionary with canonical config keys."""
         return {
             "task_capacity": self.task_capacity,
@@ -175,7 +192,7 @@ class SmallOSConfig:
             },
         }
 
-    def client_defaults_for(self, section):
+    def client_defaults_for(self, section: str) -> dict[str, int]:
         """
         Return one client section merged with the shared stream-level defaults.
 

@@ -11,6 +11,21 @@ That separation is what makes the project-specific features possible:
 - a runtime shape that is easier to port to MicroPython
 """
 
+from __future__ import annotations
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from typing import Any
+
+    from .Kernel import Kernel
+    from .SmallTask import SmallTask
+    from ._types import ErrorHandler, RuntimeErrorEvent, SmallOSConfigData
+
 from .awaitables import TaskInstruction
 from .SmallIO import SmallIO
 from .SmallConfig import SmallOSConfig
@@ -31,7 +46,12 @@ class SmallOS(SmallIO):
     and easier to customize.
     """
 
-    def __init__(self, size=None, config=None, **kwargs):
+    def __init__(
+        self,
+        size: int | None = None,
+        config: SmallOSConfig | SmallOSConfigData | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Create the runtime shell plus its task and shell registries.
 
@@ -79,11 +99,11 @@ class SmallOS(SmallIO):
                     shells.setOS(self)
                     self.shells.append(shells)
 
-    def startOS(self):
+    def startOS(self) -> None:
         """Compatibility entrypoint kept from the earlier project API."""
         return self.start()
 
-    def start(self):
+    def start(self) -> None:
         """
         Run the scheduler until no live tasks remain.
 
@@ -113,12 +133,12 @@ class SmallOS(SmallIO):
                 return
         return
 
-    def next(self):
+    def next(self) -> SmallTask | None:
         """Return the next runnable task without advancing the main loop."""
         self.cursor = self.tasks.pop()
         return self.cursor
 
-    def fork(self, children):
+    def fork(self, children: SmallTask | list[SmallTask]) -> int | list[int]:
         """Register one task or a list of tasks with the runtime."""
         if isinstance(children, list):
             ids = []
@@ -127,7 +147,7 @@ class SmallOS(SmallIO):
             return ids
         return self._fork_one(children)
 
-    def _fork_one(self, task):
+    def _fork_one(self, task: SmallTask) -> int:
         """Assign a PID, attach the runtime, and enqueue the task if runnable."""
         pid = self.tasks.insert(task)
         if pid == -1:
@@ -138,17 +158,19 @@ class SmallOS(SmallIO):
             self.tasks.enqueue(task)
         return pid
 
-    def setKernel(self, kernel):
+    def setKernel(self, kernel: Kernel) -> SmallOS:
         """Attach the platform abstraction used for time and output."""
         self.kernel = kernel
         return self
 
-    def setEternalWatchers(self, isEternalWatcherPresent):
+    def setEternalWatchers(self, isEternalWatcherPresent: bool) -> SmallOS:
         """Control whether the runtime exits once only watcher tasks remain."""
         self.eternalWatchers = isEternalWatcherPresent
         return self
 
-    def setErrorHandler(self, handler, include_cancelled=False):
+    def setErrorHandler(
+        self, handler: ErrorHandler | None, include_cancelled: bool = False
+    ) -> SmallOS:
         """
         Install a best-effort runtime error observer for failed tasks.
 
@@ -196,7 +218,13 @@ class SmallOS(SmallIO):
             self.kernel.sleep_ms(timeout)
         return True
 
-    def resume_task(self, task, value=_MISSING, exc=None, front=False):
+    def resume_task(
+        self,
+        task: SmallTask,
+        value: Any = _MISSING,
+        exc: BaseException | None = None,
+        front: bool = False,
+    ) -> int:
         """
         Requeue a blocked task with the value or exception that completed it.
 
@@ -213,13 +241,13 @@ class SmallOS(SmallIO):
         self.tasks.enqueue(task, front=front)
         return 0
 
-    def on_signal(self, task, sig):
+    def on_signal(self, task: SmallTask, sig: int) -> None:
         """Wake a task immediately if it is actively waiting on ``sig``."""
         if task._blocked_reason == "signal" and task._waiting_signal == sig:
             task.signals[sig] = 0
             self.resume_task(task, value=sig, front=True)
 
-    def _handle_yield(self, task, yielded):
+    def _handle_yield(self, task: SmallTask, yielded: Any) -> None:
         """
         Interpret one scheduler instruction emitted by a task.
 
@@ -320,13 +348,14 @@ class SmallOS(SmallIO):
         task.fail(UnsupportedAwaitableError("Unknown instruction {!r}".format(operation)))
         self._finalize_task(task)
 
-    def _resolve_task(self, target):
+    def _resolve_task(self, target: int | SmallTask) -> SmallTask | None:
         """Normalize either a task object or a PID to a task object."""
-        if hasattr(target, "getID"):
+        if not isinstance(target, int):
             return target
-        return self.tasks.search(target)
+        found = self.tasks.search(target)
+        return None if found == -1 else found
 
-    def _normalize_targets(self, targets):
+    def _normalize_targets(self, targets: Iterable[int | SmallTask]) -> list[SmallTask] | None:
         """Resolve a join target list while preserving caller-specified order."""
         normalized = []
         seen = set()
@@ -423,7 +452,7 @@ class SmallOS(SmallIO):
         if task not in waiters[io_obj]:
             waiters[io_obj].append(task)
 
-    def _wake_io_tasks(self, timeout_ms=0):
+    def _wake_io_tasks(self, timeout_ms: int | None = 0):
         """
         Ask the kernel which I/O objects are ready and resume their waiters.
 
@@ -647,7 +676,7 @@ class SmallOS(SmallIO):
         if failure_event is not None:
             self._dispatch_error_handler(failure_event)
 
-    def cancel_task(self, task, recursive=False):
+    def cancel_task(self, task: int | SmallTask, recursive: bool = False) -> int:
         """Cancel a task by object or PID and optionally cancel its descendants."""
         target = self._resolve_task(task)
         if target is None or target == -1:
@@ -667,7 +696,7 @@ class SmallOS(SmallIO):
         self._finalize_task(target)
         return 0
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return a human-readable dump of the currently registered tasks."""
         all_tasks = list(self.tasks.tasks)
         string = "SmallOS\n"

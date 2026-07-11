@@ -1,3 +1,14 @@
+from __future__ import annotations
+
+try:
+	from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover
+	TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+	from collections.abc import Callable, Sequence
+	from typing import Any
+
 # from numpy import log as ln
 # import math 
 # import random
@@ -5,7 +16,13 @@
 
 
 
-def search(data,target,l,r, func=None):
+def search(
+    data: Sequence[Any],
+    target: Any,
+    l: int,
+    r: int,
+    func: Callable[[Sequence[Any], int], Any] | None = None,
+) -> int:
 	'''
 	@function search - Performs a binary search on a sorted list 
 		and returns the index of the found element. 
@@ -26,6 +43,7 @@ def search(data,target,l,r, func=None):
 
 	if func == None:
 		func = lambda dat,index: dat[index]
+	assert func is not None
 
 	mid = ((r - l) / 2)
 	mid = int(mid)
@@ -42,7 +60,13 @@ def search(data,target,l,r, func=None):
 		return -1
 
 
-def insert(data,target,l,r,func=None):
+def insert(
+    data: Sequence[Any],
+    target: Any,
+    l: int,
+    r: int,
+    func: Callable[[Sequence[Any], int], Any] | None = None,
+) -> int:
 	'''
 	@function insert - Performs a binary search on a sorted list 
 		and returns the index of where the element should be added. 
@@ -63,6 +87,7 @@ def insert(data,target,l,r,func=None):
 	
 	if func == None:
 		func = lambda dat,index: dat[index]
+	assert func is not None
 
 	mid = (r - l)/2
 	mid = int(mid)
