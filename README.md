@@ -18,6 +18,7 @@ The project is currently experimental but usable. The runtime core supports:
 - time-based sleeping
 - readiness-based socket/I/O waiting
 - generic TCP/TLS kernel hooks for higher-level protocols
+- dependency-free thread and asyncio execution adapters for user libraries
 - smallOS-native HTTP, Redis, MQTT, SSE, and WebSocket helper clients
 
 ## Why smallOS?
@@ -45,6 +46,8 @@ That makes it a good fit for:
   buffered app/shell output routing and terminal-mode helpers
 - [SmallPackage/clients](SmallPackage/clients):
   protocol client package for cooperative network integrations
+- [SmallPackage/adapters](SmallPackage/adapters):
+  dependency-free escape hatches for blocking and asyncio-owned user code
 - [SmallPackage/clients/README.md](SmallPackage/clients/README.md):
   detailed client-specific guide and API notes
 - [SmallPackage/clients/SmallHTTP.py](SmallPackage/clients/SmallHTTP.py):
@@ -174,6 +177,8 @@ task has been finalized. Current event fields include:
 - `io_wait_mode`
 - `join_target_id`
 - `join_pending_ids`
+- `adapter_name`
+- `adapter_job_id`
 - `traceback_text`
 
 By default, `TaskCancelledError` does not trigger the handler. Pass
@@ -311,6 +316,12 @@ The new demos live in [demos](demos):
   cooperative single-thread web app demo with HTTP routes, live browser UI, and shell-driven server shutdown
 - [demos/mqtt_demo.py](demos/mqtt_demo.py):
   MQTT example built on the native cooperative client
+- [demos/adapters_demo.py](demos/adapters_demo.py):
+  thread and asyncio escape hatches running beside a regular SmallOS task
+- [demos/adapters_sqlite_demo.py](demos/adapters_sqlite_demo.py):
+  a user-owned `sqlite3` connection kept on one thread-adapter worker
+- [demos/adapters_asyncio_demo.py](demos/adapters_asyncio_demo.py):
+  a persistent asyncio queue and background task reused across adapter calls
 
 All of the shared demo entry points now install a default runtime error handler
 through [demos/common.py](demos/common.py). That means network failures,
@@ -335,6 +346,107 @@ The original root demo remains available in
 This means arbitrary `asyncio` libraries are not drop-in compatible with the
 runtime, but it also means scheduling policy and portability stay under your
 control.
+
+## Execution Adapters
+
+Execution adapters let a SmallOS task yield while user-supplied code runs under
+a different execution model. They use only the Python standard library and do
+not install, import, configure, or wrap database drivers, ORMs, SDKs, or other
+third-party packages.
+
+Use `ThreadAdapter` for a synchronous blocking callable:
+
+```python
+from SmallPackage.adapters.threads import ThreadAdapter
+
+
+def load_record(user_library, settings, record_id):
+    connection = user_library.connect(**settings)
+    try:
+        return connection.load(record_id)
+    finally:
+        connection.close()
+
+
+with ThreadAdapter(max_workers=4, max_pending=64) as blocking:
+    async def load(task):
+        return await blocking.call(
+            load_record,
+            user_selected_library,
+            connection_settings,
+            42,
+        )
+
+    runtime.fork(SmallTask(2, load, name="load"))
+    runtime.start()
+```
+
+Use `AsyncioAdapter` for an async callable that must run on asyncio. The
+adapter owns one persistent event loop in a dedicated thread, allowing
+loop-affine clients to be reused when all their operations are routed through
+the same adapter:
+
+```python
+from SmallPackage.adapters.asyncio_loop import AsyncioAdapter
+
+
+async def fetch_record(user_library, settings, record_id):
+    async with user_library.Client(**settings) as client:
+        return await client.fetch(record_id)
+
+
+with AsyncioAdapter(max_pending=64) as foreign_async:
+    async def load(task):
+        return await foreign_async.call(
+            fetch_record,
+            user_selected_async_library,
+            connection_settings,
+            42,
+        )
+
+    runtime.fork(SmallTask(2, load, name="load"))
+    runtime.start()
+```
+
+Important behavior:
+
+- adapters bind to the first SmallOS runtime that uses them;
+- adapter shutdown is explicit, so a context manager should wrap
+  `runtime.start()`;
+- `max_pending` rejects excess work with `AdapterCapacityError` instead of
+  blocking the scheduler;
+- cancelling a SmallTask can cancel queued thread work, but cannot forcibly
+  stop a running Python thread;
+- asyncio cancellation is requested on the adapter loop, but a user library
+  may delay or suppress it;
+- pass an async callable to `AsyncioAdapter.call()`, not a `Task` or `Future`
+  already owned by another loop;
+- inspect `AsyncioAdapter.shutdown_error` after shutdown when application
+  diagnostics need to detect an unexpected loop stop or library teardown
+  failure; normal shutdown leaves it as `None`;
+- use `ThreadAdapter(max_workers=1)` when user resources require a serialized,
+  thread-affine execution lane; create, use, and close those resources through
+  calls on that same adapter rather than creating them on the SmallOS thread.
+
+### Standard-library examples
+
+All adapter demos run without installing anything beyond SmallOS:
+
+```bash
+python3 demos/adapters_demo.py
+python3 demos/adapters_sqlite_demo.py
+python3 demos/adapters_asyncio_demo.py
+```
+
+- [demos/adapters_demo.py](demos/adapters_demo.py) runs both adapters beside an
+  ordinary cooperative SmallOS task.
+- [demos/adapters_sqlite_demo.py](demos/adapters_sqlite_demo.py) creates, uses,
+  and closes an in-memory `sqlite3` connection through
+  `ThreadAdapter(max_workers=1)`. This is the ownership pattern to adapt for a
+  thread-affine PostgreSQL driver or ORM session supplied by the user.
+- [demos/adapters_asyncio_demo.py](demos/adapters_asyncio_demo.py) creates an
+  `asyncio.Queue`, `Future` objects, and a background task, performs multiple
+  operations, and cleans them up on the same persistent adapter event loop.
 
 ## Running on MicroPython
 
