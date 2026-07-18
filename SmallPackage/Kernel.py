@@ -236,6 +236,10 @@ class Kernel:
 	) -> tuple[list[Any], list[Any]]:
 		return [], []
 
+	def supports_external_wait_objects(self) -> bool:
+		"""Whether ``io_wait`` can wake on adapter-owned readiness objects."""
+		return False
+
 	def validate_io_wait_object(
 		self, obj: Any
 	) -> tuple[bool, BaseException | None]:
@@ -428,6 +432,9 @@ class Unix(Kernel):
 		ready_read, ready_write, _ = self._select.select(readables, writables, [], timeout)
 		return ready_read, ready_write
 
+	def supports_external_wait_objects(self):
+		return True
+
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port, type=self._socket.SOCK_STREAM)[0]
 
@@ -618,6 +625,9 @@ class MicroPythonKernel(Kernel):
 		if timeout_ms is not None and timeout_ms > 0:
 			self.sleep_ms(timeout_ms)
 		return [], []
+
+	def supports_external_wait_objects(self):
+		return bool(self._poll_factory)
 
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port)[0]

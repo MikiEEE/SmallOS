@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .SmallOS import SmallOS
     from .SmallTask import SmallTask
     from .TaskState import TaskState
-    from .awaitables import _InstructionAwaitable
+    from .awaitables import InstructionAwaitable
 
 from .awaitables import (
     sleep_instruction,
@@ -143,7 +143,7 @@ class SmallSignals:
 
     def sleep(
         self, secs: float, state_blob: dict[Any, Any] | None = None
-    ) -> _InstructionAwaitable[None]:
+    ) -> InstructionAwaitable[None]:
         """
         Return the awaitable used for cooperative sleeping.
 
@@ -156,7 +156,7 @@ class SmallSignals:
 
     def wait_signal(
         self, sig: int, state_blob: dict[Any, Any] | None = None
-    ) -> _InstructionAwaitable[int]:
+    ) -> InstructionAwaitable[int]:
         """Return the awaitable used to wait until ``sig`` is delivered."""
         if state_blob is not None:
             self.state.update(state_blob)
@@ -164,19 +164,19 @@ class SmallSignals:
 
     def sigSuspendV2(
         self, sig: int, state_blob: dict[Any, Any] | None = None
-    ) -> _InstructionAwaitable[int]:
+    ) -> InstructionAwaitable[int]:
         """Compatibility alias for the older generator-era suspension name."""
         return self.wait_signal(sig, state_blob)
 
-    def yield_now(self) -> _InstructionAwaitable[None]:
+    def yield_now(self) -> InstructionAwaitable[None]:
         """Return the awaitable used for an explicit cooperative yield."""
         return yield_now_instruction()
 
-    def wait_readable(self, io_obj: Any) -> _InstructionAwaitable[Any]:
+    def wait_readable(self, io_obj: Any) -> InstructionAwaitable[Any]:
         """Return the awaitable used to wait until ``io_obj`` is readable."""
         return wait_readable_instruction(io_obj)
 
-    def wait_writable(self, io_obj: Any) -> _InstructionAwaitable[Any]:
+    def wait_writable(self, io_obj: Any) -> InstructionAwaitable[Any]:
         """Return the awaitable used to wait until ``io_obj`` is writable."""
         return wait_writable_instruction(io_obj)
 

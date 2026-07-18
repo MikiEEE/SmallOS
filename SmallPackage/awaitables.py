@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - exercised on constrained runtimes
     TYPE_CHECKING = False
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable
+    from collections.abc import Callable, Generator, Iterable
     from typing import Any, Generic, TypeVar
 
     from ._types import TaskTarget
@@ -47,7 +47,7 @@ class TaskInstruction:
         )
 
 
-class _InstructionAwaitable(Generic[T] if TYPE_CHECKING else object):
+class InstructionAwaitable(Generic[T] if TYPE_CHECKING else object):
     """
     Tiny awaitable wrapper shared by the public helpers below.
 
@@ -65,36 +65,54 @@ class _InstructionAwaitable(Generic[T] if TYPE_CHECKING else object):
         return result
 
 
-def sleep_instruction(seconds: float) -> _InstructionAwaitable[None]:
+def sleep_instruction(seconds: float) -> InstructionAwaitable[None]:
     """Create the awaitable used for cooperative sleeping."""
-    return _InstructionAwaitable(TaskInstruction("sleep", seconds=seconds))
+    return InstructionAwaitable(TaskInstruction("sleep", seconds=seconds))
 
 
-def wait_signal_instruction(signal: int) -> _InstructionAwaitable[int]:
+def wait_signal_instruction(signal: int) -> InstructionAwaitable[int]:
     """Create the awaitable used for waiting on a task signal."""
-    return _InstructionAwaitable(TaskInstruction("wait_signal", signal=signal))
+    return InstructionAwaitable(TaskInstruction("wait_signal", signal=signal))
 
 
-def yield_now_instruction() -> _InstructionAwaitable[None]:
+def yield_now_instruction() -> InstructionAwaitable[None]:
     """Create the awaitable used for a voluntary scheduler yield."""
-    return _InstructionAwaitable(TaskInstruction("yield_now"))
+    return InstructionAwaitable(TaskInstruction("yield_now"))
 
 
-def join_instruction(target: TaskTarget) -> _InstructionAwaitable[Any]:
+def join_instruction(target: TaskTarget) -> InstructionAwaitable[Any]:
     """Create the awaitable used for waiting on a single task."""
-    return _InstructionAwaitable(TaskInstruction("join", target=target))
+    return InstructionAwaitable(TaskInstruction("join", target=target))
 
 
-def join_all_instruction(targets: Iterable[TaskTarget]) -> _InstructionAwaitable[list[Any]]:
+def join_all_instruction(targets: Iterable[TaskTarget]) -> InstructionAwaitable[list[Any]]:
     """Create the awaitable used for waiting on several tasks at once."""
-    return _InstructionAwaitable(TaskInstruction("join_all", targets=list(targets)))
+    return InstructionAwaitable(TaskInstruction("join_all", targets=list(targets)))
 
 
-def wait_readable_instruction(io_obj: Any) -> _InstructionAwaitable[Any]:
+def wait_readable_instruction(io_obj: Any) -> InstructionAwaitable[Any]:
     """Create the awaitable used for waiting until an I/O object is readable."""
-    return _InstructionAwaitable(TaskInstruction("wait_readable", io_obj=io_obj))
+    return InstructionAwaitable(TaskInstruction("wait_readable", io_obj=io_obj))
 
 
-def wait_writable_instruction(io_obj: Any) -> _InstructionAwaitable[Any]:
+def wait_writable_instruction(io_obj: Any) -> InstructionAwaitable[Any]:
     """Create the awaitable used for waiting until an I/O object is writable."""
-    return _InstructionAwaitable(TaskInstruction("wait_writable", io_obj=io_obj))
+    return InstructionAwaitable(TaskInstruction("wait_writable", io_obj=io_obj))
+
+
+def adapter_call_instruction(
+    adapter: Any,
+    callable_obj: Callable[..., T],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+) -> InstructionAwaitable[T]:
+    """Create an awaitable for one call through an execution adapter."""
+    return InstructionAwaitable(
+        TaskInstruction(
+            "adapter_call",
+            adapter=adapter,
+            callable=callable_obj,
+            args=args,
+            kwargs=kwargs,
+        )
+    )
