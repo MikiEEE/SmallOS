@@ -58,6 +58,7 @@ class SmallOS(SmallIO):
         self.wakeUpdate = []
         self.ioReadWaiters = {}
         self.ioWriteWaiters = {}
+        self._io_wait_set = None
         self.shells = []
         self.tasks = OSList(self.config.priority_levels, self.config.task_capacity)
         self.kernel = None
@@ -91,27 +92,68 @@ class SmallOS(SmallIO):
         task, advances it once, and then either finalizes it or handles the wait
         condition it requested.
         """
-        while len(self.tasks) != 0:
-            self._wake_sleeping_tasks()
-            self._wake_io_tasks(timeout_ms=0)
-            self.cursor = self.tasks.pop()
+        self._open_io_wait_set()
+        try:
+            while len(self.tasks) != 0:
+                self._wake_sleeping_tasks()
+                if self.tasks.has_ready():
+                    # Include newly ready I/O tasks in the priority decision.
+                    self._wake_io_tasks(timeout_ms=0)
+                else:
+                    # Go directly to the blocking wait instead of first issuing
+                    # a redundant zero-time poll.
+                    if not self._idle_until_next_task():
+                        break
+                    self._wake_sleeping_tasks()
 
-            if self.cursor is None:
-                if not self._idle_until_next_task():
-                    break
-                continue
+                self.cursor = self.tasks.pop()
+                if self.cursor is None:
+                    continue
 
-            yielded = self.cursor.execute()
-            if self.cursor.done:
-                # Finished tasks are finalized immediately so PID lookup and join
-                # bookkeeping always see a consistent terminal state.
-                self._finalize_task(self.cursor)
-            else:
-                self._handle_yield(self.cursor, yielded)
+                yielded = self.cursor.execute()
+                if self.cursor.done:
+                    # Finished tasks are finalized immediately so PID lookup and join
+                    # bookkeeping always see a consistent terminal state.
+                    self._finalize_task(self.cursor)
+                else:
+                    self._handle_yield(self.cursor, yielded)
 
-            if not self.eternalWatchers and len(self.tasks) != 0 and self.tasks.isOnlyWatchers():
-                return
-        return
+                if not self.eternalWatchers and len(self.tasks) != 0 and self.tasks.isOnlyWatchers():
+                    return
+            return
+        finally:
+            self._close_io_wait_set()
+
+    def _open_io_wait_set(self):
+        """Create and seed the kernel's optional persistent readiness set."""
+        self._close_io_wait_set()
+        if self.kernel is None:
+            return
+        factory = getattr(self.kernel, "create_io_wait_set", None)
+        if factory is None:
+            return
+        wait_set = factory()
+        if wait_set is None:
+            return
+
+        self._io_wait_set = wait_set
+        try:
+            self._fail_invalid_io_waiters()
+            for io_obj in self.ioReadWaiters:
+                self._refresh_io_interest(io_obj)
+            for io_obj in self.ioWriteWaiters:
+                if io_obj not in self.ioReadWaiters:
+                    self._refresh_io_interest(io_obj)
+        except BaseException:
+            self._close_io_wait_set()
+            raise
+
+    def _close_io_wait_set(self):
+        """Close only the backend wait set, never the registered user objects."""
+        wait_set = self._io_wait_set
+        self._io_wait_set = None
+        if wait_set is not None:
+            wait_set.close()
 
     def next(self):
         """Return the next runnable task without advancing the main loop."""
@@ -398,7 +440,18 @@ class SmallOS(SmallIO):
         self._begin_wait(task, reason)
         task._io_wait_obj = io_obj
         task._io_wait_mode = mode
-        self._register_io_wait(task, io_obj, mode)
+        validator = getattr(self.kernel, "validate_io_wait_object", None)
+        if validator is not None:
+            is_valid, exc = validator(io_obj)
+            if not is_valid:
+                self.resume_task(task, exc=self._clone_wait_error(exc), front=True)
+                return
+        try:
+            self._register_io_wait(task, io_obj, mode)
+        except Exception as exc:
+            # Registration failures belong at the await expression; they should
+            # not tear down the entire scheduler loop.
+            self.resume_task(task, exc=exc, front=True)
 
     def _enter_join_wait(self, task, target):
         """Block ``task`` until ``target`` finishes."""
@@ -418,10 +471,29 @@ class SmallOS(SmallIO):
     def _register_io_wait(self, task, io_obj, mode):
         """Register a task as waiting on an I/O object's readiness event."""
         waiters = self.ioReadWaiters if mode == "read" else self.ioWriteWaiters
+        added_interest = io_obj not in waiters
         if io_obj not in waiters:
             waiters[io_obj] = []
         if task not in waiters[io_obj]:
             waiters[io_obj].append(task)
+        if added_interest:
+            try:
+                self._refresh_io_interest(io_obj)
+            except Exception:
+                waiters[io_obj].remove(task)
+                if not waiters[io_obj]:
+                    del waiters[io_obj]
+                raise
+
+    def _refresh_io_interest(self, io_obj):
+        """Apply one object's combined logical interest to a persistent wait set."""
+        if self._io_wait_set is None:
+            return
+        self._io_wait_set.set_interest(
+            io_obj,
+            io_obj in self.ioReadWaiters,
+            io_obj in self.ioWriteWaiters,
+        )
 
     def _wake_io_tasks(self, timeout_ms=0):
         """
@@ -439,13 +511,15 @@ class SmallOS(SmallIO):
         if not self.ioReadWaiters and not self.ioWriteWaiters:
             return
 
-        readable, writable = self.kernel.io_wait(
-            list(self.ioReadWaiters.keys()),
-            list(self.ioWriteWaiters.keys()),
-            timeout_ms,
-        )
-        self._resume_io_waiters(readable, self.ioReadWaiters)
-        self._resume_io_waiters(writable, self.ioWriteWaiters)
+        if self._io_wait_set is not None:
+            readable, writable = self._io_wait_set.wait(timeout_ms)
+        else:
+            readable, writable = self.kernel.io_wait(
+                list(self.ioReadWaiters.keys()),
+                list(self.ioWriteWaiters.keys()),
+                timeout_ms,
+            )
+        self._resume_ready_io(readable, writable)
 
     def _fail_invalid_io_waiters(self):
         """
@@ -458,17 +532,21 @@ class SmallOS(SmallIO):
         validator = getattr(self.kernel, "validate_io_wait_object", None)
         if validator is None:
             return
-        self._fail_invalid_io_waiters_in_map(self.ioReadWaiters, validator)
-        self._fail_invalid_io_waiters_in_map(self.ioWriteWaiters, validator)
+        io_objects = list(self.ioReadWaiters.keys())
+        for io_obj in self.ioWriteWaiters:
+            if io_obj not in self.ioReadWaiters:
+                io_objects.append(io_obj)
 
-    def _fail_invalid_io_waiters_in_map(self, waiters_map, validator):
-        """Detach invalid I/O objects from ``waiters_map`` and fail their waiters."""
-        for io_obj in list(waiters_map.keys()):
+        for io_obj in io_objects:
             is_valid, exc = validator(io_obj)
             if is_valid:
                 continue
 
-            waiters = waiters_map.pop(io_obj, [])
+            waiters = self.ioReadWaiters.pop(io_obj, [])
+            for waiter in self.ioWriteWaiters.pop(io_obj, []):
+                if waiter not in waiters:
+                    waiters.append(waiter)
+            self._refresh_io_interest(io_obj)
             for waiter in waiters:
                 if waiter.done or self.tasks.search(waiter.getID()) == -1:
                     continue
@@ -484,10 +562,26 @@ class SmallOS(SmallIO):
                 return RuntimeError(str(exc))
         return RuntimeError("I/O wait object is no longer valid.")
 
-    def _resume_io_waiters(self, ready_objects, waiters_map):
-        """Resume every task waiting on the now-ready I/O objects."""
-        for io_obj in ready_objects:
-            waiters = waiters_map.pop(io_obj, [])
+    def _resume_ready_io(self, readable, writable):
+        """Detach one readiness snapshot before applying registration deltas."""
+        batches = []
+        changed_objects = []
+        for ready_objects, waiters_map in (
+            (readable, self.ioReadWaiters),
+            (writable, self.ioWriteWaiters),
+        ):
+            for io_obj in ready_objects:
+                waiters = waiters_map.pop(io_obj, [])
+                batches.append((io_obj, waiters))
+                if io_obj not in changed_objects:
+                    changed_objects.append(io_obj)
+
+        # An object ready for both directions should move directly from its
+        # combined mask to its final mask instead of modify-then-unregister.
+        for io_obj in changed_objects:
+            self._refresh_io_interest(io_obj)
+
+        for io_obj, waiters in batches:
             for waiter in waiters:
                 if waiter.done or self.tasks.search(waiter.getID()) == -1:
                     continue
@@ -508,12 +602,14 @@ class SmallOS(SmallIO):
                 child.discard_join_waiter(task)
 
         if task._io_wait_obj is not None and task._io_wait_mode is not None:
+            io_obj = task._io_wait_obj
             waiters_map = self.ioReadWaiters if task._io_wait_mode == "read" else self.ioWriteWaiters
-            waiters = waiters_map.get(task._io_wait_obj, [])
+            waiters = waiters_map.get(io_obj, [])
             while task in waiters:
                 waiters.remove(task)
-            if not waiters and task._io_wait_obj in waiters_map:
-                del waiters_map[task._io_wait_obj]
+            if not waiters and io_obj in waiters_map:
+                del waiters_map[io_obj]
+                self._refresh_io_interest(io_obj)
 
     def _should_dispatch_failure(self, task):
         """Return whether ``task`` should produce a runtime failure event."""
