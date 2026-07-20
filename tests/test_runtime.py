@@ -1,9 +1,11 @@
+import os
 import sys
+import socket
 import unittest
 
 sys.path.append("..")
 
-from SmallPackage.Kernel import Kernel
+from SmallPackage.Kernel import Kernel, Unix
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
 from SmallPackage.SmallErrors import TaskCancelledError
@@ -72,6 +74,65 @@ class StrictWaitKernel(FakeKernel):
             if not is_valid:
                 raise exc
         return super().io_wait(readables, writables, timeout_ms=timeout_ms)
+
+
+class CountingWaitSet:
+    def __init__(self, kernel):
+        self.kernel = kernel
+        self.interests = {}
+        self.interest_changes = []
+        self.wait_calls = []
+        self.closed = False
+
+    def set_interest(self, obj, readable, writable):
+        interest = (bool(readable), bool(writable))
+        previous = self.interests.get(obj, (False, False))
+        if interest == previous:
+            return
+        self.interest_changes.append((obj, interest[0], interest[1]))
+        if interest == (False, False):
+            self.interests.pop(obj, None)
+        else:
+            self.interests[obj] = interest
+
+    def wait(self, timeout_ms=None):
+        self.wait_calls.append(timeout_ms)
+        if timeout_ms is not None and timeout_ms > 0:
+            self.kernel.now += int(timeout_ms)
+        if timeout_ms == 0 and self.kernel.defer_ready_until_blocking:
+            return [], []
+
+        ready_read = [
+            obj
+            for obj, interest in self.interests.items()
+            if interest[0] and obj in self.kernel.readable
+        ]
+        ready_write = [
+            obj
+            for obj, interest in self.interests.items()
+            if interest[1] and obj in self.kernel.writable
+        ]
+        for obj in ready_read:
+            self.kernel.readable.discard(obj)
+        for obj in ready_write:
+            self.kernel.writable.discard(obj)
+        return ready_read, ready_write
+
+    def close(self):
+        self.closed = True
+        self.interests.clear()
+
+
+class PersistentFakeKernel(FakeKernel):
+    def __init__(self):
+        super().__init__()
+        self.wait_sets = []
+        self.defer_ready_until_blocking = False
+
+    def create_io_wait_set(self):
+        wait_set = CountingWaitSet(self)
+        self.wait_sets.append(wait_set)
+        return wait_set
 
 
 class ClosedWaitObject:
@@ -184,6 +245,185 @@ class TestRuntime(unittest.TestCase):
         self.build_os(waiter_task)
 
         self.assertTrue(waiter_task.result)
+
+    def test_persistent_wait_set_uses_one_blocking_wait_on_idle_entry(self):
+        io_obj = object()
+        kernel = PersistentFakeKernel()
+        kernel.mark_readable(io_obj)
+        runtime = SmallOS().setKernel(kernel)
+
+        async def waiter(task, watched):
+            return await task.wait_readable(watched)
+
+        waiter_task = SmallTask(2, waiter, name="waiter", args=(io_obj,))
+        runtime.fork(waiter_task)
+        runtime.startOS()
+
+        wait_set = kernel.wait_sets[0]
+        self.assertIs(io_obj, waiter_task.result)
+        self.assertEqual([None], wait_set.wait_calls)
+        self.assertEqual(
+            [(io_obj, True, False), (io_obj, False, False)],
+            wait_set.interest_changes,
+        )
+        self.assertTrue(wait_set.closed)
+
+    def test_persistent_wait_set_modifies_combined_interest_only_on_changes(self):
+        io_obj = object()
+        kernel = PersistentFakeKernel()
+        kernel.defer_ready_until_blocking = True
+        kernel.mark_readable(io_obj)
+        kernel.mark_writable(io_obj)
+        runtime = SmallOS().setKernel(kernel)
+
+        async def read_waiter(task, watched):
+            return await task.wait_readable(watched)
+
+        async def write_waiter(task, watched):
+            return await task.wait_writable(watched)
+
+        reader = SmallTask(2, read_waiter, name="reader", args=(io_obj,))
+        writer = SmallTask(3, write_waiter, name="writer", args=(io_obj,))
+        runtime.fork([reader, writer])
+        runtime.startOS()
+
+        wait_set = kernel.wait_sets[0]
+        self.assertIs(io_obj, reader.result)
+        self.assertIs(io_obj, writer.result)
+        self.assertEqual(
+            [
+                (io_obj, True, False),
+                (io_obj, True, True),
+                (io_obj, False, False),
+            ],
+            wait_set.interest_changes,
+        )
+        self.assertEqual([0, None], wait_set.wait_calls)
+
+    def test_persistent_wait_set_is_rebuilt_when_watcher_runtime_restarts(self):
+        io_obj = object()
+        kernel = PersistentFakeKernel()
+        runtime = SmallOS().setKernel(kernel)
+
+        async def watcher(task, watched):
+            return await task.wait_readable(watched)
+
+        watcher_task = SmallTask(
+            2,
+            watcher,
+            name="watcher",
+            args=(io_obj,),
+            isWatcher=True,
+        )
+        runtime.fork(watcher_task)
+        runtime.startOS()
+
+        self.assertEqual(1, len(kernel.wait_sets))
+        self.assertTrue(kernel.wait_sets[0].closed)
+        self.assertIn(io_obj, runtime.ioReadWaiters)
+
+        kernel.mark_readable(io_obj)
+        runtime.setEternalWatchers(True)
+        runtime.startOS()
+
+        self.assertEqual(2, len(kernel.wait_sets))
+        self.assertTrue(kernel.wait_sets[1].closed)
+        self.assertIs(io_obj, watcher_task.result)
+        self.assertNotIn(io_obj, runtime.ioReadWaiters)
+
+    def test_cancelling_persistent_io_waiter_unregisters_last_interest(self):
+        io_obj = object()
+        kernel = PersistentFakeKernel()
+        runtime = SmallOS().setKernel(kernel)
+
+        async def io_waiter(task, watched):
+            await task.wait_readable(watched)
+
+        async def killer(task, target):
+            await task.sleep(0.1)
+            target.kill()
+
+        async def parent(task, watched):
+            waiter = task.spawn(io_waiter, priority=2, name="waiter", args=(watched,))
+            task.spawn(killer, priority=1, name="killer", args=(waiter,))
+            await task.sleep(0.2)
+            return watched not in task.OS.ioReadWaiters
+
+        parent_task = SmallTask(3, parent, name="parent", args=(io_obj,))
+        runtime.fork(parent_task)
+        runtime.startOS()
+
+        self.assertTrue(parent_task.result)
+        self.assertEqual(
+            [(io_obj, True, False), (io_obj, False, False)],
+            kernel.wait_sets[0].interest_changes,
+        )
+
+    def test_unix_invalid_registration_fails_await_not_scheduler(self):
+        left, right = socket.socketpair()
+        left.close()
+        runtime = SmallOS().setKernel(Unix())
+
+        async def waiter(task, watched):
+            try:
+                await task.wait_readable(watched)
+            except ValueError as exc:
+                return "invalid file descriptor" in str(exc)
+            return False
+
+        waiter_task = SmallTask(2, waiter, name="waiter", args=(left,))
+        runtime.fork(waiter_task)
+        try:
+            runtime.startOS()
+        finally:
+            right.close()
+
+        self.assertTrue(waiter_task.result)
+
+    def test_unix_closed_integer_descriptor_fails_await_not_scheduler(self):
+        read_fd, write_fd = os.pipe()
+        os.close(read_fd)
+        runtime = SmallOS().setKernel(Unix())
+
+        async def waiter(task, watched):
+            try:
+                await task.wait_readable(watched)
+            except OSError:
+                return True
+            return False
+
+        waiter_task = SmallTask(2, waiter, name="waiter", args=(read_fd,))
+        runtime.fork(waiter_task)
+        try:
+            runtime.startOS()
+        finally:
+            os.close(write_fd)
+
+        self.assertTrue(waiter_task.result)
+
+    def test_unix_runtime_uses_persistent_selector_for_socket_wait(self):
+        left, right = socket.socketpair()
+        left.setblocking(False)
+        right.setblocking(False)
+        runtime = SmallOS().setKernel(Unix())
+
+        async def reader(task, sock):
+            ready = await task.wait_readable(sock)
+            return ready.recv(1)
+
+        async def writer(task, sock):
+            sock.send(b"x")
+
+        reader_task = SmallTask(1, reader, name="reader", args=(left,))
+        writer_task = SmallTask(2, writer, name="writer", args=(right,))
+        runtime.fork([reader_task, writer_task])
+        try:
+            runtime.startOS()
+        finally:
+            left.close()
+            right.close()
+
+        self.assertEqual(b"x", reader_task.result)
 
     def test_killing_io_waiter_clears_wait_registration(self):
         """Cancelling an I/O waiter should remove it from the runtime waiter map."""
