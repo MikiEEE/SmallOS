@@ -73,16 +73,50 @@ That makes it a good fit for:
 Desktop development:
 
 ```bash
-python3 -m venv .venv
+python3.10 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install -e ".[dev]"
 ```
+
+smallOS supports CPython 3.10 and newer. Python 3.6 through 3.9 are no
+longer supported. MicroPython compatibility is maintained separately because
+its language and standard-library support do not map directly to a CPython
+release number; checker-only imports are kept off embedded runtime paths.
 
 Run the test suite:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+Run the tests with the same branch-coverage gate used by CI:
+
+```bash
+coverage run -m unittest discover -s tests -v
+coverage report
+```
+
+Run the static type checker:
+
+```bash
+pyright
+```
+
+Build the wheel and source distribution:
+
+```bash
+python -m build
+```
+
+The GitHub Actions pipeline runs four gates: Pyright, unit tests across Python
+3.10–3.13, branch coverage with a 60% floor, and distribution verification.
+Packaging runs only after the earlier gates pass, installs the built wheel,
+and smoke-tests it outside the source checkout.
+
+The package ships a `py.typed` marker. Type coverage is being tightened by
+subsystem: configuration, awaitables, task lifecycle, scheduling, signals,
+platform kernels, and core utilities form the current checked boundary, while
+protocol clients, shells, and demos remain on the incremental typing backlog.
 
 ## Quick Start
 

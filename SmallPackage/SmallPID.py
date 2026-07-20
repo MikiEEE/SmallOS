@@ -1,13 +1,16 @@
 
 
 
-class SmallPID():
+from __future__ import annotations
+
+
+class SmallPID:
     '''
     @class smallPID() - Creates and keeps track of avialable
         Process ID's
     '''
 
-    def __init__(self, max=2**16):
+    def __init__(self, max: int = 2**16) -> None:
         '''
         @function __init__() - Initializes essential maintenence 
             structures.
@@ -21,7 +24,7 @@ class SmallPID():
         return
 
 
-    def newPID(self):
+    def newPID(self) -> int:
         '''
         @function newPID() - Creates a new valid PID. 
         @return - int - positive integer on success 
@@ -40,7 +43,7 @@ class SmallPID():
             return -1
 
 
-    def freePID(self,pid):
+    def freePID(self, pid: int) -> None:
         '''
         @function freePID - removes the pid from the used 
             pid set() making the pid available for future 
@@ -49,4 +52,4 @@ class SmallPID():
         '''
         if pid in self.usedPID:
             self.usedPID.remove(pid)
-        return 
+        return
