@@ -41,6 +41,20 @@ class TestOSList(unittest.TestCase):
         self.assertEqual(0, tasks.delete(pid))
         self.assertEqual(-1, tasks.search(pid))
 
+    def test_has_ready_preserves_live_task_and_discards_stale_entries(self):
+        tasks = OSList(10)
+        stale = SmallTask(1, None, name="stale")
+        live = SmallTask(2, None, name="live")
+        for task in (stale, live):
+            tasks.insert(task)
+            tasks.enqueue(task)
+        tasks.delete(stale.getID())
+
+        self.assertTrue(tasks.has_ready())
+        self.assertFalse(stale._queued)
+        self.assertIs(live, tasks.pop())
+        self.assertFalse(tasks.has_ready())
+
 
 if __name__ == "__main__":
     unittest.main()

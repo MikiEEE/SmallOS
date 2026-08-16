@@ -130,6 +130,18 @@ class OSList(SmallPID):
                 return task
         return None
 
+    def has_ready(self) -> bool:
+        """Return whether a valid runnable task is queued without removing it."""
+        for priority in range(1, self.num_priorities):
+            queue = self.ready[priority]
+            while queue:
+                task = queue[0]
+                if self.search(task.getID()) != -1 and task.getExeStatus():
+                    return True
+                queue.popleft()
+                task._queued = False
+        return False
+
     def add_sleeping(self, task: SmallTask, wake_time: int) -> None:
         """Push a sleeping task onto the wake-time heap."""
         self._sleep_seq += 1
