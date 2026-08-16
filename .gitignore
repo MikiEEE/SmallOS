@@ -6,4 +6,7 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-
+docs/
+skills/
+AGENTS.md
+CLAUDE.md

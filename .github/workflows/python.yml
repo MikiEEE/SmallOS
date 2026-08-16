@@ -9,9 +9,23 @@ permissions:
 
 concurrency:
   group: python-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  release-policy:
+    name: Release policy
+    if: github.event_name == 'pull_request' && github.base_ref == 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Validate the pull request title
+        env:
+          SMALL_OS_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python tools/release_policy.py
+
   typing:
     name: Static typing
     runs-on: ubuntu-latest
