@@ -1,0 +1,279 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Python CI"]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag whose GitHub Release assets need repair
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smallos-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag, build, and publish GitHub Release
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Check out the exact CI-tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Bind the tested commit to the local release branch
+        env:
+          SMALL_OS_RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git checkout --force -B master "$SMALL_OS_RELEASE_SHA"
+          test "$(git rev-parse HEAD)" = "$SMALL_OS_RELEASE_SHA"
+
+      - name: Detect an idempotent workflow rerun
+        id: existing
+        run: |
+          exact_tags="$(git tag --points-at HEAD --list 'v[0-9]*')"
+          tag_count="$(printf '%s\n' "$exact_tags" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$tag_count" -gt 1 ]; then
+            echo "Expected at most one release tag on the tested commit" >&2
+            exit 1
+          fi
+          existing_tag="$(printf '%s\n' "$exact_tags" | sed '/^$/d')"
+          echo "tag=$existing_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify an existing release is already complete
+        if: steps.existing.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SMALL_OS_EXISTING_TAG: ${{ steps.existing.outputs.tag }}
+        run: |
+          asset_state="$(gh release view "$SMALL_OS_EXISTING_TAG" --json assets --jq '
+            (.assets | map(select(.name | endswith(".whl"))) | length) == 1 and
+            (.assets | map(select(.name | endswith(".tar.gz"))) | length) == 1
+          ')"
+          if [ "$asset_state" != "true" ]; then
+            echo "Existing release is incomplete; use the manual repair workflow" >&2
+            exit 1
+          fi
+
+      - name: Determine the semantic version and create the tag and release
+        id: semantic-release
+        if: steps.existing.outputs.tag == ''
+        uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          build: "false"
+          changelog: "false"
+          commit: "false"
+          push: "true"
+          strict: "true"
+          tag: "true"
+          vcs_release: "true"
+
+      - name: Resolve release metadata
+        id: metadata
+        env:
+          SMALL_OS_EXISTING_TAG: ${{ steps.existing.outputs.tag }}
+          SMALL_OS_RELEASED: ${{ steps.semantic-release.outputs.released }}
+          SMALL_OS_RELEASE_TAG: ${{ steps.semantic-release.outputs.tag }}
+          SMALL_OS_RELEASE_VERSION: ${{ steps.semantic-release.outputs.version }}
+        run: |
+          if [ -n "$SMALL_OS_EXISTING_TAG" ]; then
+            release_tag="$SMALL_OS_EXISTING_TAG"
+            release_version="${SMALL_OS_EXISTING_TAG#v}"
+            new_release=false
+          elif [ "$SMALL_OS_RELEASED" = "true" ]; then
+            release_tag="$SMALL_OS_RELEASE_TAG"
+            release_version="$SMALL_OS_RELEASE_VERSION"
+            new_release=true
+          else
+            echo "Successful master CI did not produce a semantic release" >&2
+            exit 1
+          fi
+          echo "tag=$release_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$release_version" >> "$GITHUB_OUTPUT"
+          echo "new_release=$new_release" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        if: steps.metadata.outputs.new_release == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Build distributions from the tagged commit
+        if: steps.metadata.outputs.new_release == 'true'
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Verify release artifact metadata
+        if: steps.metadata.outputs.new_release == 'true'
+        env:
+          SMALL_OS_RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: >-
+          python tools/verify_release_artifacts.py dist
+          --name SmallPackage
+          --version "$SMALL_OS_RELEASE_VERSION"
+
+      - name: Install the release wheel
+        if: steps.metadata.outputs.new_release == 'true'
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Smoke-test the installed release outside the checkout
+        if: steps.metadata.outputs.new_release == 'true'
+        working-directory: /tmp
+        env:
+          SMALL_OS_RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: >-
+          python -c "import os; from importlib.metadata import version;
+          from SmallPackage import SmallOS, SmallOSConfig, SmallTask, Unix;
+          assert version('SmallPackage') == os.environ['SMALL_OS_RELEASE_VERSION'];
+          assert SmallOS(config=SmallOSConfig()).setKernel(Unix())"
+
+      - name: Attach distributions to the GitHub Release
+        if: steps.metadata.outputs.new_release == 'true'
+        uses: python-semantic-release/publish-action@5a5718ce47b892ef699f2972dae122297771d641 # v10.6.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.metadata.outputs.tag }}
+
+      - name: Retain release distributions
+        if: steps.metadata.outputs.new_release == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-release-${{ steps.metadata.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Write release summary
+        env:
+          SMALL_OS_RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          SMALL_OS_RELEASE_TAG: ${{ steps.metadata.outputs.tag }}
+          SMALL_OS_RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          SMALL_OS_NEW_RELEASE: ${{ steps.metadata.outputs.new_release }}
+        run: |
+          {
+            echo "## SmallOS release"
+            echo ""
+            echo "- Commit: \`$SMALL_OS_RELEASE_SHA\`"
+            echo "- Tag: \`$SMALL_OS_RELEASE_TAG\`"
+            echo "- Version: \`$SMALL_OS_RELEASE_VERSION\`"
+            echo "- Created by this run: \`$SMALL_OS_NEW_RELEASE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  repair:
+    name: Repair assets for an existing release
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Preserve the trusted release verifier
+        run: cp tools/verify_release_artifacts.py "$RUNNER_TEMP/verify_release_artifacts.py"
+
+      - name: Validate and check out the immutable release tag
+        id: metadata
+        env:
+          SMALL_OS_REPAIR_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s\n' "$SMALL_OS_REPAIR_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Repair tag must have the form vX.Y.Z" >&2
+            exit 1
+          fi
+          git rev-parse --verify "refs/tags/${SMALL_OS_REPAIR_TAG}^{commit}" >/dev/null
+          git checkout --detach "refs/tags/$SMALL_OS_REPAIR_TAG"
+          gh release view "$SMALL_OS_REPAIR_TAG" >/dev/null
+          echo "tag=$SMALL_OS_REPAIR_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${SMALL_OS_REPAIR_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Rebuild distributions from the immutable tag
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Verify rebuilt artifact metadata
+        env:
+          SMALL_OS_RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: >-
+          python "$RUNNER_TEMP/verify_release_artifacts.py" dist
+          --name SmallPackage
+          --version "$SMALL_OS_RELEASE_VERSION"
+
+      - name: Install the rebuilt wheel
+        run: python -m pip install --force-reinstall dist/*.whl
+
+      - name: Smoke-test the rebuilt wheel outside the checkout
+        working-directory: /tmp
+        env:
+          SMALL_OS_RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+        run: >-
+          python -c "import os; from importlib.metadata import version;
+          from SmallPackage import SmallOS, SmallOSConfig, SmallTask, Unix;
+          assert version('SmallPackage') == os.environ['SMALL_OS_RELEASE_VERSION'];
+          assert SmallOS(config=SmallOSConfig()).setKernel(Unix())"
+
+      - name: Attach only missing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SMALL_OS_REPAIR_TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          existing_assets="$RUNNER_TEMP/smallos-existing-release-assets.txt"
+          gh release view "$SMALL_OS_REPAIR_TAG" --json assets --jq '.assets[].name' > "$existing_assets"
+          for asset_path in dist/*; do
+            asset_name="$(basename "$asset_path")"
+            if grep -Fqx "$asset_name" "$existing_assets"; then
+              echo "Keeping existing release asset: $asset_name"
+            else
+              gh release upload "$SMALL_OS_REPAIR_TAG" "$asset_path"
+            fi
+          done
+
+      - name: Retain repaired distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-release-repair-${{ steps.metadata.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Write repair summary
+        env:
+          SMALL_OS_REPAIR_TAG: ${{ steps.metadata.outputs.tag }}
+          SMALL_OS_REPAIR_VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          {
+            echo "## SmallOS release repair"
+            echo ""
+            echo "- Existing tag: \`$SMALL_OS_REPAIR_TAG\`"
+            echo "- Version: \`$SMALL_OS_REPAIR_VERSION\`"
+            echo "- Result: rebuilt, verified, and uploaded missing assets only"
+          } >> "$GITHUB_STEP_SUMMARY"
