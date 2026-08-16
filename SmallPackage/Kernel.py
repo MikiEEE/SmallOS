@@ -23,7 +23,7 @@ except ImportError:  # pragma: no cover - exercised on constrained runtimes
 
 if TYPE_CHECKING:
 	from collections.abc import Iterable, Mapping, Sequence
-	from typing import Any
+	from typing import Any, cast
 
 
 _UNSET = object()
@@ -328,6 +328,10 @@ class _PollIOWaitSet:
 		timeout = -1 if timeout_ms is None else max(0, int(timeout_ms))
 		ipoll = getattr(self._poller, 'ipoll', None)
 		events = ipoll(timeout) if callable(ipoll) else self._poller.poll(timeout)
+		if TYPE_CHECKING:
+			# MicroPython pollers return iterable (object, mask) event records,
+			# but their dynamic API cannot express that to Pyright.
+			events = cast("Iterable[Sequence[Any]]", events)
 
 		ready_read = []
 		ready_write = []
