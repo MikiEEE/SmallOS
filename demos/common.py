@@ -2,12 +2,15 @@
 Shared demo helpers for desktop and board-specific smallOS examples.
 
 These helpers keep the individual demo files short while still showing the
-recommended public API: load a config file, choose a kernel, spawn tasks, and
-start the runtime.
+recommended public API: load a config file, choose a kernel, install an error
+handler, spawn tasks, and start the runtime.
 """
+
+from __future__ import annotations
 
 import os
 import sys
+from typing import Any
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +21,7 @@ if REPO_ROOT not in sys.path:
 from SmallPackage.SmallConfig import SmallOSConfig
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
+from SmallPackage.Kernel import Kernel
 
 
 CONFIG_PATH = os.path.join(REPO_ROOT, "smallos.config.json")
@@ -32,9 +36,67 @@ def load_demo_config(**overrides):
     return config
 
 
-def build_runtime(kernel, **config_overrides):
+def build_runtime(kernel: Kernel, **config_overrides: Any) -> SmallOS:
     """Create a ``SmallOS`` instance wired to the chosen kernel."""
-    return SmallOS(config=load_demo_config(**config_overrides)).setKernel(kernel)
+    runtime = SmallOS(config=load_demo_config(**config_overrides)).setKernel(kernel)
+    return install_demo_error_handler(runtime)
+
+
+def task_runtime(task: SmallTask[Any]) -> SmallOS:
+    """Return the runtime attached before a registered task is executed."""
+    runtime = task.OS
+    if runtime is None:
+        raise RuntimeError("demo task is not attached to a SmallOS runtime")
+    return runtime
+
+
+def _format_failure_event(event):
+    """Return a readable multi-line summary for demo task failures."""
+    details = []
+    if event["parent_id"] is not None:
+        details.append("parent={}".format(event["parent_id"]))
+    if event["blocked_reason"] is not None:
+        details.append("blocked={}".format(event["blocked_reason"]))
+    if event["waiting_signal"] is not None:
+        details.append("signal={}".format(event["waiting_signal"]))
+    if event["io_wait_mode"] is not None:
+        details.append("io={}".format(event["io_wait_mode"]))
+    if event["join_target_id"] is not None:
+        details.append("join_target={}".format(event["join_target_id"]))
+    if event["join_pending_ids"]:
+        details.append("join_pending={}".format(event["join_pending_ids"]))
+    if event.get("adapter_name") is not None:
+        details.append(
+            "adapter={}#{}".format(
+                event["adapter_name"],
+                event.get("adapter_job_id"),
+            )
+        )
+
+    header = "[smallOS demo] task failure"
+    if event["task_name"]:
+        header += " in {}".format(event["task_name"])
+    if event["task_id"] is not None:
+        header += " (PID {})".format(event["task_id"])
+    header += ": {}".format(event["exception_repr"])
+
+    if details:
+        header += " [{}]".format(", ".join(details))
+
+    trace = event.get("traceback_text")
+    if trace:
+        return "{}\n{}".format(header, trace if trace.endswith("\n") else trace + "\n")
+    return header + "\n"
+
+
+def install_demo_error_handler(runtime, include_cancelled=False):
+    """Attach the shared demo error logger to ``runtime``."""
+
+    def _handler(event):
+        runtime.kernel.write(_format_failure_event(event))
+
+    runtime.setErrorHandler(_handler, include_cancelled=include_cancelled)
+    return runtime
 
 
 async def worker(task):

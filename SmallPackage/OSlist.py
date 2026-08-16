@@ -10,8 +10,20 @@ small and focused. PID lookup uses a sorted list, ready tasks live in one FIFO
 queue per priority, and sleeping tasks live in a wake-time heap.
 """
 
+from __future__ import annotations
+
 from collections import deque
 import heapq
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from typing import Literal
+
+    from .SmallTask import SmallTask
 
 from .list_util.binSearchList import insert, search
 from .SmallPID import SmallPID
@@ -22,7 +34,7 @@ class OSList(SmallPID):
     Combined PID registry and queue manager for the cooperative scheduler.
     """
 
-    def __init__(self, priors=5, length=2**12):
+    def __init__(self, priors: int = 5, length: int = 2**12) -> None:
         """Create the PID registry plus ready/sleep queue structures."""
         SmallPID.__init__(self, length)
         self.num_priorities = priors
@@ -37,7 +49,7 @@ class OSList(SmallPID):
         """Compatibility no-op kept for older callers."""
         return
 
-    def insert(self, task):
+    def insert(self, task: SmallTask) -> int:
         """Assign a PID and register a task in the PID-sorted backing list."""
         priority = task.priority
         if not 0 < priority < self.num_priorities:
@@ -55,7 +67,7 @@ class OSList(SmallPID):
         self.tasks.insert(index, task)
         return pid
 
-    def search(self, pid):
+    def search(self, pid: int) -> SmallTask | Literal[-1]:
         """Look up a task by PID."""
         length = len(self.tasks)
         index = search(self.tasks, pid, 0, length, self.func)
@@ -63,7 +75,7 @@ class OSList(SmallPID):
             return -1
         return self.tasks[index]
 
-    def delete(self, pid):
+    def delete(self, pid: int) -> int:
         """Remove a task from PID storage and watcher accounting."""
         length = len(self.tasks)
         index = search(self.tasks, pid, 0, length, self.func)
@@ -77,7 +89,7 @@ class OSList(SmallPID):
         self.freePID(pid)
         return 0
 
-    def enqueue(self, task, front=False):
+    def enqueue(self, task: SmallTask, front: bool = False) -> int:
         """
         Put a runnable task on its per-priority ready queue.
 
@@ -99,7 +111,7 @@ class OSList(SmallPID):
         task._queued = True
         return 0
 
-    def pop(self):
+    def pop(self) -> SmallTask | None:
         """
         Return the next runnable task.
 
@@ -118,12 +130,24 @@ class OSList(SmallPID):
                 return task
         return None
 
-    def add_sleeping(self, task, wake_time):
+    def has_ready(self) -> bool:
+        """Return whether a valid runnable task is queued without removing it."""
+        for priority in range(1, self.num_priorities):
+            queue = self.ready[priority]
+            while queue:
+                task = queue[0]
+                if self.search(task.getID()) != -1 and task.getExeStatus():
+                    return True
+                queue.popleft()
+                task._queued = False
+        return False
+
+    def add_sleeping(self, task: SmallTask, wake_time: int) -> None:
         """Push a sleeping task onto the wake-time heap."""
         self._sleep_seq += 1
         heapq.heappush(self.sleeping, (wake_time, self._sleep_seq, task))
 
-    def wake_sleeping(self, now):
+    def wake_sleeping(self, now: int) -> list[SmallTask]:
         """
         Return every task whose scheduled wake time has arrived.
 
@@ -140,7 +164,7 @@ class OSList(SmallPID):
             ready.append(task)
         return ready
 
-    def next_wake_time(self):
+    def next_wake_time(self) -> int | None:
         """Peek at the next valid wake time, discarding stale heap entries."""
         while self.sleeping:
             wake_time, _, task = self.sleeping[0]
@@ -150,18 +174,18 @@ class OSList(SmallPID):
             return wake_time
         return None
 
-    def list(self):
+    def list(self) -> list[SmallTask]:
         """Return a snapshot list of currently registered tasks."""
         return [task for task in self.tasks]
 
-    def isOnlyWatchers(self):
+    def isOnlyWatchers(self) -> bool:
         """Report whether every remaining task is marked as a watcher."""
         return len(self.tasks) == self.numWatchers
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of registered tasks."""
         return len(self.tasks)
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return a newline-separated dump of all known tasks."""
         return "\n".join([str(x) for x in self.tasks])

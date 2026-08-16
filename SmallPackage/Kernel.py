@@ -14,11 +14,22 @@ They only provide capability hints and convenience configuration around the
 shared MicroPython transport/time API.
 """
 
+from __future__ import annotations
+
+try:
+	from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover - exercised on constrained runtimes
+	TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+	from collections.abc import Iterable, Mapping, Sequence
+	from typing import Any, cast
+
 
 _UNSET = object()
 
 
-def _import_first(*module_names):
+def _import_first(*module_names: str) -> Any | None:
 	"""
 	Import the first available module name from a list.
 
@@ -35,7 +46,7 @@ def _import_first(*module_names):
 	return None
 
 
-def _portable_shell_split(line):
+def _portable_shell_split(line: str) -> list[str]:
 	"""
 	Tokenize one shell command line without relying on desktop-only helpers.
 
@@ -90,7 +101,275 @@ def _portable_shell_split(line):
 	return tokens
 
 
-def detect_micropython_machine_name(sys_mod=None, os_mod=None):
+def _io_wait_lookup_key(obj):
+	"""Return the stable descriptor/key used by poll-style backends."""
+	if hasattr(obj, 'fileno'):
+		try:
+			return obj.fileno()
+		except Exception:
+			pass
+	return obj
+
+
+class _SelectorIOWaitSet:
+	"""Persistent CPython selector with delta-updated registrations."""
+
+	def __init__(self, selector, read_mask, write_mask):
+		self._selector = selector
+		self._read_mask = read_mask
+		self._write_mask = write_mask
+		self._entries = {}
+		self._objects_by_key = {}
+		self._closed = False
+
+	def _event_mask(self, readable, writable):
+		mask = 0
+		if readable:
+			mask |= self._read_mask
+		if writable:
+			mask |= self._write_mask
+		return mask
+
+	def _remove(self, obj):
+		entry = self._entries.pop(obj, None)
+		if entry is None:
+			return
+		_, key = entry
+		if self._objects_by_key.get(key) is obj:
+			del self._objects_by_key[key]
+		try:
+			self._selector.unregister(key)
+		except (KeyError, OSError, ValueError):
+			# The descriptor may already have been closed and removed by the OS.
+			pass
+
+	def _discard_stale_key_owner(self, obj, key):
+		existing_obj = self._objects_by_key.get(key)
+		if existing_obj is None or existing_obj is obj:
+			return
+
+		if _io_wait_lookup_key(existing_obj) == key:
+			raise ValueError(
+				'I/O descriptor {} is already registered by another object.'.format(key)
+			)
+		self._remove(existing_obj)
+
+	def set_interest(self, obj, readable, writable):
+		"""Apply one object's combined read/write interest when it changes."""
+		if self._closed:
+			raise RuntimeError('I/O wait set is closed.')
+
+		mask = self._event_mask(readable, writable)
+		entry = self._entries.get(obj)
+		if entry is None:
+			if mask == 0:
+				return
+			lookup_key = _io_wait_lookup_key(obj)
+			self._discard_stale_key_owner(obj, lookup_key)
+			selector_key = self._selector.register(obj, mask, obj)
+			key = selector_key.fd
+			self._entries[obj] = (mask, key)
+			self._objects_by_key[key] = obj
+			return
+
+		old_mask, key = entry
+		if mask == 0:
+			self._remove(obj)
+			return
+		if mask == old_mask:
+			return
+
+		current_key = _io_wait_lookup_key(obj)
+		if current_key != key:
+			self._remove(obj)
+			self.set_interest(obj, readable, writable)
+			return
+
+		self._selector.modify(key, mask, obj)
+		self._entries[obj] = (mask, key)
+
+	def wait(self, timeout_ms=None):
+		"""Wait for readiness without rebuilding the registered descriptor set."""
+		if self._closed:
+			raise RuntimeError('I/O wait set is closed.')
+		timeout = None if timeout_ms is None else max(0, timeout_ms) / 1000
+		events = self._selector.select(timeout)
+		ready_read = []
+		ready_write = []
+		for selector_key, mask in events:
+			obj = selector_key.data
+			entry = self._entries.get(obj)
+			if entry is None or entry[1] != selector_key.fd:
+				raise RuntimeError('I/O selector returned a stale readiness event.')
+			if mask & self._read_mask:
+				ready_read.append(obj)
+			if mask & self._write_mask:
+				ready_write.append(obj)
+		return ready_read, ready_write
+
+	def close(self):
+		"""Release selector resources without closing registered user objects."""
+		if self._closed:
+			return
+		for obj in list(self._entries):
+			self._remove(obj)
+		self._selector.close()
+		self._closed = True
+
+
+class _PollIOWaitSet:
+	"""Portable persistent poll set used by MicroPython kernels."""
+
+	def __init__(self, select_mod, poller):
+		self._poller = poller
+		self._read_mask = getattr(select_mod, 'POLLIN', 0x001)
+		self._write_mask = getattr(select_mod, 'POLLOUT', 0x004)
+		self._invalid_mask = getattr(select_mod, 'POLLNVAL', 0x020)
+		self._error_mask = (
+			getattr(select_mod, 'POLLERR', 0x008)
+			| getattr(select_mod, 'POLLHUP', 0x010)
+			| getattr(select_mod, 'POLLRDHUP', 0)
+			| self._invalid_mask
+		)
+		self._entries = {}
+		self._objects_by_key = {}
+		self._closed = False
+
+	def _event_mask(self, readable, writable):
+		mask = 0
+		if readable:
+			mask |= self._read_mask
+		if writable:
+			mask |= self._write_mask
+		return mask
+
+	def _remove(self, obj):
+		entry = self._entries.pop(obj, None)
+		if entry is None:
+			return
+		_, key = entry
+		if self._objects_by_key.get(key) is obj:
+			del self._objects_by_key[key]
+
+		try:
+			self._poller.unregister(obj)
+			return
+		except Exception:
+			pass
+		try:
+			self._poller.unregister(key)
+		except Exception:
+			# Some MicroPython ports discard closed streams automatically.
+			pass
+
+	def _discard_stale_key_owner(self, obj, key):
+		existing_obj = self._objects_by_key.get(key)
+		if existing_obj is None or existing_obj is obj:
+			return
+		if _io_wait_lookup_key(existing_obj) == key:
+			raise ValueError(
+				'I/O descriptor {} is already registered by another object.'.format(key)
+			)
+		self._remove(existing_obj)
+
+	def set_interest(self, obj, readable, writable):
+		"""Apply one poll registration delta."""
+		if self._closed:
+			raise RuntimeError('I/O wait set is closed.')
+
+		mask = self._event_mask(readable, writable)
+		entry = self._entries.get(obj)
+		if entry is None:
+			if mask == 0:
+				return
+			key = _io_wait_lookup_key(obj)
+			self._discard_stale_key_owner(obj, key)
+			self._poller.register(obj, mask)
+			self._entries[obj] = (mask, key)
+			self._objects_by_key[key] = obj
+			return
+
+		old_mask, key = entry
+		if mask == 0:
+			self._remove(obj)
+			return
+		if mask == old_mask:
+			return
+
+		current_key = _io_wait_lookup_key(obj)
+		if current_key != key:
+			self._remove(obj)
+			self.set_interest(obj, readable, writable)
+			return
+
+		modifier = getattr(self._poller, 'modify', None)
+		if modifier is not None:
+			modifier(obj, mask)
+		else:
+			# MicroPython permits repeated register() calls to update the mask.
+			self._poller.register(obj, mask)
+		self._entries[obj] = (mask, key)
+
+	def _ready_object(self, event_obj):
+		try:
+			if event_obj in self._entries:
+				return event_obj
+		except (KeyError, TypeError):
+			pass
+		try:
+			return self._objects_by_key[event_obj]
+		except (KeyError, TypeError):
+			raise RuntimeError('poll returned an unknown I/O object.')
+
+	def wait(self, timeout_ms=None):
+		"""Consume poll/ipoll events immediately and return original objects."""
+		if self._closed:
+			raise RuntimeError('I/O wait set is closed.')
+		timeout = -1 if timeout_ms is None else max(0, int(timeout_ms))
+		ipoll = getattr(self._poller, 'ipoll', None)
+		events = ipoll(timeout) if callable(ipoll) else self._poller.poll(timeout)
+		if TYPE_CHECKING:
+			# MicroPython pollers return iterable (object, mask) event records,
+			# but their dynamic API cannot express that to Pyright.
+			events = cast("Iterable[Sequence[Any]]", events)
+
+		ready_read = []
+		ready_write = []
+		for event in events:
+			event_obj = event[0]
+			mask = event[1]
+			obj = self._ready_object(event_obj)
+			entry = self._entries.get(obj)
+			if entry is None:
+				raise RuntimeError('poll returned a stale readiness event.')
+			requested_mask = entry[0]
+			ready_mask = mask
+			if mask & self._error_mask:
+				# HUP/ERR apply to the requested directions even though callers do
+				# not include those unsolicited bits in the registration mask.
+				ready_mask |= requested_mask
+			if ready_mask & self._read_mask:
+				ready_read.append(obj)
+			if ready_mask & self._write_mask:
+				ready_write.append(obj)
+			if mask & self._invalid_mask:
+				self._remove(obj)
+		return ready_read, ready_write
+
+	def close(self):
+		"""Unregister streams and clear constrained-runtime references."""
+		if self._closed:
+			return
+		for obj in list(self._entries):
+			self._remove(obj)
+		closer = getattr(self._poller, 'close', None)
+		if closer is not None:
+			closer()
+		self._objects_by_key.clear()
+		self._closed = True
+
+
+def detect_micropython_machine_name(sys_mod: Any = None, os_mod: Any = None) -> str:
 	"""
 	Best-effort lookup of the active board/firmware machine name.
 
@@ -122,7 +401,9 @@ def detect_micropython_machine_name(sys_mod=None, os_mod=None):
 	return ''
 
 
-def build_micropython_kernel(machine_name=None, **kwargs):
+def build_micropython_kernel(
+	machine_name: str | None = None, **kwargs: Any
+) -> MicroPythonKernel:
 	"""
 	Return the best built-in MicroPython kernel profile for the current board.
 
@@ -157,14 +438,14 @@ class Kernel:
 	requiring protocol-specific kernel methods.
 	'''
 
-	def __init__(self):
+	def __init__(self) -> None:
 		self._scheduler_anchor_tick = None
 		self._scheduler_elapsed_ms = 0
 
-	def write(self, msg):
+	def write(self, msg: str) -> None:
 		pass
 
-	def shell_split(self, line):
+	def shell_split(self, line: str) -> list[str]:
 		"""
 		Tokenize one shell command line.
 
@@ -174,22 +455,22 @@ class Kernel:
 		"""
 		return _portable_shell_split(line)
 
-	def time_epoch(self):
-		pass
+	def time_epoch(self) -> float:
+		raise NotImplementedError
 
-	def ticks_ms(self):
-		pass
+	def ticks_ms(self) -> int:
+		raise NotImplementedError
 
-	def ticks_add(self, base, delta_ms):
+	def ticks_add(self, base: int, delta_ms: int) -> int:
 		return base + delta_ms
 
-	def ticks_diff(self, end, start):
+	def ticks_diff(self, end: int, start: int) -> int:
 		return end - start
 
-	def time_monotonic(self):
+	def time_monotonic(self) -> float:
 		return self.scheduler_now_ms() / 1000
 
-	def scheduler_now_ms(self):
+	def scheduler_now_ms(self) -> int:
 		'''
 		Returns a non-decreasing scheduler clock in milliseconds.
 
@@ -208,38 +489,80 @@ class Kernel:
 		self._scheduler_anchor_tick = current
 		return self._scheduler_elapsed_ms
 
-	def sleep(self, secs):
+	def sleep(self, secs: float) -> None:
 		self.sleep_ms(int(max(0, secs) * 1000))
 		return
 
-	def sleep_ms(self, delay_ms):
+	def sleep_ms(self, delay_ms: int) -> None:
 		pass
 
-	def io_wait(self, readables, writables, timeout_ms=None):
+	def io_wait(
+		self,
+		readables: Iterable[Any],
+		writables: Iterable[Any],
+		timeout_ms: int | None = None,
+	) -> tuple[list[Any], list[Any]]:
 		return [], []
 
-	def resolve_address(self, host, port):
+	def create_io_wait_set(self):
+		"""Return an optional persistent readiness set for one scheduler run."""
 		return None
 
-	def socket_open(self, address_info):
+	def supports_external_wait_objects(self) -> bool:
+		"""Whether ``io_wait`` can wake on adapter-owned readiness objects."""
+		return False
+
+	def validate_io_wait_object(
+		self, obj: Any
+	) -> tuple[bool, BaseException | None]:
+		"""
+		Return whether ``obj`` still looks safe to hand to poll/select.
+
+		Closed sockets on CPython typically report ``fileno() == -1`` after close.
+		Letting those reach ``select.poll().register(...)`` crashes the runtime
+		with ``ValueError`` before the waiting task can be resumed or cleaned up.
+		"""
+		if obj is None:
+			return False, ValueError('I/O wait object cannot be None.')
+		if isinstance(obj, int):
+			if obj < 0:
+				return False, ValueError(
+					'I/O wait object has invalid file descriptor ({}).'.format(obj)
+				)
+			return True, None
+		if hasattr(obj, 'fileno'):
+			try:
+				fd = obj.fileno()
+			except Exception as exc:
+				return False, exc
+			if isinstance(fd, int) and fd < 0:
+				return False, ValueError(
+					'I/O wait object has invalid file descriptor ({}).'.format(fd)
+				)
+		return True, None
+
+	def resolve_address(self, host: str, port: int) -> Any:
 		return None
 
-	def socket_setblocking(self, sock, flag):
+	def socket_open(self, address_info: Any) -> Any:
+		return None
+
+	def socket_setblocking(self, sock: Any, flag: bool) -> None:
 		return
 
-	def socket_connect(self, sock, sockaddr):
+	def socket_connect(self, sock: Any, sockaddr: Any) -> bool:
 		return True
 
-	def socket_connection_error(self, sock):
+	def socket_connection_error(self, sock: Any) -> int:
 		return 0
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: bytes) -> int:
 		return 0
 
-	def socket_recv(self, sock, buffer_size):
+	def socket_recv(self, sock: Any, buffer_size: int) -> bytes:
 		return b''
 
-	def socket_close(self, sock):
+	def socket_close(self, sock: Any) -> None:
 		return
 
 	def socket_wrap_tls_client(
@@ -253,10 +576,10 @@ class Kernel:
 	):
 		return sock
 
-	def socket_do_handshake(self, sock):
+	def socket_do_handshake(self, sock: Any) -> None:
 		return
 
-	def _extract_errno(self, exc):
+	def _extract_errno(self, exc: BaseException) -> int | None:
 		errno_value = getattr(exc, 'errno', None)
 		if errno_value is not None:
 			return errno_value
@@ -264,13 +587,13 @@ class Kernel:
 			return exc.args[0]
 		return None
 
-	def socket_needs_read(self, exc):
+	def socket_needs_read(self, exc: BaseException) -> bool:
 		return isinstance(exc, BlockingIOError)
 
-	def socket_needs_write(self, exc):
+	def socket_needs_write(self, exc: BaseException) -> bool:
 		return False
 
-	def _poll_lookup_key(self, obj):
+	def _poll_lookup_key(self, obj: Any) -> Any:
 		"""
 		Return the identity key used to map poll events back to registered objects.
 
@@ -278,12 +601,7 @@ class Kernel:
 		original socket object, so the kernel needs a stable way to translate poll
 		results back into the scheduler's waiter keys.
 		"""
-		if hasattr(obj, 'fileno'):
-			try:
-				return obj.fileno()
-			except Exception:
-				pass
-		return obj
+		return _io_wait_lookup_key(obj)
 
 
 class Unix(Kernel):
@@ -298,16 +616,27 @@ class Unix(Kernel):
 	def __init__(self):
 		super().__init__()
 		import errno
+		import os
 		import shlex
 		import select
+		import selectors
 		import socket
 		import ssl
 		import sys
 		import time
 
 		self._errno = errno
+		self._os = os
 		self._shlex = shlex
 		self._select = select
+		self._selector_factory = selectors.DefaultSelector
+		if sys.platform == 'darwin' and hasattr(selectors, 'PollSelector'):
+			# Kqueue has a comparatively high fixed cost for zero-time checks on
+			# macOS. Persistent poll avoids the small-wait-set scheduler regression
+			# while still removing registration rebuilds.
+			self._selector_factory = selectors.PollSelector
+		self._selector_read_mask = selectors.EVENT_READ
+		self._selector_write_mask = selectors.EVENT_WRITE
 		self._socket = socket
 		self._ssl = ssl
 		self._sys = sys
@@ -380,6 +709,32 @@ class Unix(Kernel):
 			return [], []
 		ready_read, ready_write, _ = self._select.select(readables, writables, [], timeout)
 		return ready_read, ready_write
+
+	def create_io_wait_set(self):
+		"""Create the runtime-owned selector used for persistent Unix waits."""
+		return _SelectorIOWaitSet(
+			self._selector_factory(),
+			self._selector_read_mask,
+			self._selector_write_mask,
+		)
+
+	def validate_io_wait_object(self, obj: Any) -> tuple[bool, BaseException | None]:
+		"""Reject Unix descriptors that were closed behind a persistent wait set."""
+		is_valid, exc = super().validate_io_wait_object(obj)
+		if not is_valid:
+			return is_valid, exc
+
+		fd = _io_wait_lookup_key(obj)
+		if not isinstance(fd, int):
+			return True, None
+		try:
+			self._os.fstat(fd)
+		except (OSError, OverflowError, ValueError) as exc:
+			return False, exc
+		return True, None
+
+	def supports_external_wait_objects(self) -> bool:
+		return True
 
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port, type=self._socket.SOCK_STREAM)[0]
@@ -479,9 +834,15 @@ class MicroPythonKernel(Kernel):
 
 		modules = modules or {}
 
-		self._time = modules.get('time') or _import_first('time', 'utime')
+		time_mod = modules.get('time') or _import_first('time', 'utime')
+		if time_mod is None:
+			raise ImportError('MicroPythonKernel requires time or utime.')
+		self._time = time_mod
 		self._select = modules.get('select') or _import_first('select', 'uselect')
-		self._socket = modules.get('socket') or _import_first('socket', 'usocket')
+		socket_mod = modules.get('socket') or _import_first('socket', 'usocket')
+		if socket_mod is None:
+			raise ImportError('MicroPythonKernel requires socket or usocket.')
+		self._socket = socket_mod
 		self._ssl = modules.get('ssl')
 		if self._ssl is None:
 			self._ssl = _import_first('ssl', 'ussl')
@@ -565,6 +926,15 @@ class MicroPythonKernel(Kernel):
 		if timeout_ms is not None and timeout_ms > 0:
 			self.sleep_ms(timeout_ms)
 		return [], []
+
+	def create_io_wait_set(self):
+		"""Reuse one poller when the active MicroPython port supplies it."""
+		if self._poll_factory is None:
+			return None
+		return _PollIOWaitSet(self._select, self._poll_factory())
+
+	def supports_external_wait_objects(self) -> bool:
+		return bool(self._poll_factory)
 
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port)[0]
@@ -653,6 +1023,8 @@ class MicroPythonKernel(Kernel):
 			except TypeError as exc:
 				last_error = exc
 		else:
+			if last_error is None:
+				raise RuntimeError('TLS wrapper did not produce a socket.')
 			raise last_error
 		if hasattr(wrapped, 'setblocking'):
 			wrapped.setblocking(False)
@@ -667,12 +1039,14 @@ class MicroPythonKernel(Kernel):
 		err = self._extract_errno(exc)
 		if err in {11, 115}:
 			return True
-		if self._ssl and hasattr(self._ssl, 'SSLWantReadError') and isinstance(exc, self._ssl.SSLWantReadError):
+		want_read_error = getattr(self._ssl, 'SSLWantReadError', None)
+		if isinstance(want_read_error, type) and isinstance(exc, want_read_error):
 			return True
 		return isinstance(exc, BlockingIOError)
 
 	def socket_needs_write(self, exc):
-		if self._ssl and hasattr(self._ssl, 'SSLWantWriteError') and isinstance(exc, self._ssl.SSLWantWriteError):
+		want_write_error = getattr(self._ssl, 'SSLWantWriteError', None)
+		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
 			return True
 		return False
 
