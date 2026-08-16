@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from typing import Any, Generic, TypeVar
 
     from .SmallOS import SmallOS
-    from ._types import TaskRoutine
+    from ._types import ExecutionAdapterLike, TaskRoutine
 
     T = TypeVar("T")
 
@@ -59,7 +59,7 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self.isLocked = 0
         self.isWatcher = False
         self.parent = None
-        self.OS = None
+        self.OS: SmallOS | None = None
         self.state = TaskState()
         self.children = []
         self.name = ""
@@ -83,6 +83,10 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self._join_waiters = []
         self._io_wait_obj = None
         self._io_wait_mode = None
+        self._adapter: ExecutionAdapterLike | None = None
+        self._adapter_job_id: int | None = None
+        self._adapter_resume_name: str | None = None
+        self._adapter_resume_job_id: int | None = None
 
         self.state.update({"return_status": 0}, "system")
 
@@ -264,7 +268,7 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         """Record why the task is no longer runnable."""
         self._blocked_reason = reason
         self.isReady = 0
-        self.isWaiting = 1 if reason in ("signal", "join", "join_all") else 0
+        self.isWaiting = 1 if reason in ("signal", "join", "join_all", "adapter") else 0
         self.isSleep = 1 if reason == "sleep" else 0
         self.state.update({"return_status": 1, "blocked_reason": reason}, "system")
 

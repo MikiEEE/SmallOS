@@ -48,12 +48,28 @@ fallback_version = "0.0.0"
 [tool.pyright]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
-include = ["SmallPackage", "demos"]
+include = ["SmallPackage", "demos", "tests/typing"]
+strict = [
+    "SmallPackage/adapters",
+    "demos/adapters_demo.py",
+    "demos/adapters_sqlite_demo.py",
+    "demos/adapters_asyncio_demo.py",
+    "tests/typing",
+]
 exclude = ["build", "dist"]
 ignore = [
     "SmallPackage/clients",
     "SmallPackage/shells.py",
-    "demos",
+    "demos/esp32_demo.py",
+    "demos/http_demo.py",
+    "demos/micropython_autodetect_demo.py",
+    "demos/mqtt_demo.py",
+    "demos/pico_w_demo.py",
+    "demos/redis_demo.py",
+    "demos/runtime_demo.py",
+    "demos/shell_demo.py",
+    "demos/unix_demo.py",
+    "demos/web_app_demo.py",
 ]
 reportMissingTypeStubs = false
 reportUnknownMemberType = false
