@@ -1,0 +1,117 @@
+[build-system]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "SmallPackage"
+dynamic = ["version"]
+description = "Concurrent and priority-oriented task management system"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Michael E" }]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2",
+    "coverage>=7.6",
+    "pyright>=1.1.390",
+]
+
+[project.urls]
+Documentation = "https://github.com/MikiEEE/SmallOS"
+Source = "https://github.com/MikiEEE/SmallOS"
+Issues = "https://github.com/MikiEEE/SmallOS/issues"
+
+[tool.setuptools.packages.find]
+include = ["SmallPackage*"]
+
+[tool.setuptools.package-data]
+SmallPackage = ["py.typed"]
+"SmallPackage.clients" = ["README.md"]
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
+
+[tool.semantic_release]
+commit_parser = "conventional"
+tag_format = "v{version}"
+version_toml = []
+version_variables = []
+
+[tool.semantic_release.branches.master]
+match = "master"
+prerelease = false
+
+[tool.semantic_release.commit_parser_options]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+other_allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "refactor",
+    "style",
+    "test",
+]
+default_bump_level = 1
+parse_squash_commits = true
+ignore_merge_commits = true
+
+[tool.pyright]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+include = ["SmallPackage", "demos", "tests/typing"]
+strict = [
+    "SmallPackage/adapters",
+    "demos/adapters_demo.py",
+    "demos/adapters_sqlite_demo.py",
+    "demos/adapters_asyncio_demo.py",
+    "tests/typing",
+]
+exclude = ["build", "dist"]
+ignore = [
+    "SmallPackage/clients",
+    "SmallPackage/shells.py",
+    "demos/esp32_demo.py",
+    "demos/http_demo.py",
+    "demos/micropython_autodetect_demo.py",
+    "demos/mqtt_demo.py",
+    "demos/pico_w_demo.py",
+    "demos/redis_demo.py",
+    "demos/runtime_demo.py",
+    "demos/shell_demo.py",
+    "demos/unix_demo.py",
+    "demos/web_app_demo.py",
+]
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownLambdaType = false
+reportMissingImports = false
+
+[tool.coverage.run]
+branch = true
+source = ["SmallPackage"]
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+skip_covered = true
+
+[tool.coverage.xml]
+output = "coverage.xml"

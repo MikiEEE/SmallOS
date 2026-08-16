@@ -7,7 +7,23 @@ results, exceptions, and join bookkeeping. The scheduler can stay relatively
 small because most task-local lifecycle details live here.
 """
 
+from __future__ import annotations
+
 import inspect
+
+try:
+    from typing import TYPE_CHECKING
+except ImportError:  # pragma: no cover - exercised on constrained runtimes
+    TYPE_CHECKING = False
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from typing import Any, Generic, TypeVar
+
+    from .SmallOS import SmallOS
+    from ._types import ExecutionAdapterLike, TaskRoutine
+
+    T = TypeVar("T")
 
 from .awaitables import join_instruction, join_all_instruction
 from .SmallErrors import PIDError, TaskCancelledError
@@ -19,7 +35,7 @@ from .TaskState import TaskState
 _MISSING = object()
 
 
-class SmallTask(SmallSignals, Node):
+class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
     """
     Priority-scheduled unit of execution managed by ``SmallOS``.
 
@@ -29,7 +45,7 @@ class SmallTask(SmallSignals, Node):
     to ``asyncio``.
     """
 
-    def __init__(self, priority, routine, **kwargs):
+    def __init__(self, priority: int, routine: TaskRoutine[T], **kwargs: Any) -> None:
         """
         Create a task shell around a routine or coroutine object.
 
@@ -43,7 +59,7 @@ class SmallTask(SmallSignals, Node):
         self.isLocked = 0
         self.isWatcher = False
         self.parent = None
-        self.OS = None
+        self.OS: SmallOS | None = None
         self.state = TaskState()
         self.children = []
         self.name = ""
@@ -51,7 +67,7 @@ class SmallTask(SmallSignals, Node):
         self.updateFunc = None
         self.routine = routine
 
-        self._coroutine = None
+        self._coroutine: Any = None
         self._done = False
         self._result = None
         self._exception = None
@@ -67,6 +83,10 @@ class SmallTask(SmallSignals, Node):
         self._join_waiters = []
         self._io_wait_obj = None
         self._io_wait_mode = None
+        self._adapter: ExecutionAdapterLike | None = None
+        self._adapter_job_id: int | None = None
+        self._adapter_resume_name: str | None = None
+        self._adapter_resume_job_id: int | None = None
 
         self.state.update({"return_status": 0}, "system")
 
@@ -87,17 +107,17 @@ class SmallTask(SmallSignals, Node):
                 self.args = kwargs["args"]
 
     @property
-    def done(self):
+    def done(self) -> bool:
         """Whether the task has reached a terminal state."""
         return self._done
 
     @property
-    def result(self):
+    def result(self) -> T | None:
         """Return the stored result after successful completion."""
         return self._result
 
     @property
-    def exception(self):
+    def exception(self) -> BaseException | None:
         """Return the stored terminal exception, if any."""
         return self._exception
 
@@ -193,7 +213,7 @@ class SmallTask(SmallSignals, Node):
             return 0
         return -1
 
-    def complete(self, result):
+    def complete(self, result: T | None) -> T | None:
         """Mark the task as successfully finished and store its result."""
         self._done = True
         self._result = result
@@ -203,7 +223,7 @@ class SmallTask(SmallSignals, Node):
         self.state.update({"return_status": 0, "result": result}, "system")
         return result
 
-    def fail(self, exc):
+    def fail(self, exc: BaseException) -> BaseException:
         """Mark the task as failed and store its terminal exception."""
         self._done = True
         self._exception = exc
@@ -213,7 +233,7 @@ class SmallTask(SmallSignals, Node):
         self.state.update({"return_status": -1, "exception": exc}, "system")
         return exc
 
-    def cancel(self, message="Task cancelled"):
+    def cancel(self, message: str = "Task cancelled") -> None:
         """
         Force the task into a cancelled terminal state.
 
@@ -248,11 +268,11 @@ class SmallTask(SmallSignals, Node):
         """Record why the task is no longer runnable."""
         self._blocked_reason = reason
         self.isReady = 0
-        self.isWaiting = 1 if reason in ("signal", "join", "join_all") else 0
+        self.isWaiting = 1 if reason in ("signal", "join", "join_all", "adapter") else 0
         self.isSleep = 1 if reason == "sleep" else 0
         self.state.update({"return_status": 1, "blocked_reason": reason}, "system")
 
-    def setID(self, pid):
+    def setID(self, pid: int) -> None:
         """Assign the PID chosen by ``SmallOS`` exactly once."""
         if isinstance(pid, int):
             if self.pid == -1:
@@ -263,11 +283,11 @@ class SmallTask(SmallSignals, Node):
             raise TypeError("PID must be type Int")
         return
 
-    def getID(self):
+    def getID(self) -> int:
         """Return the task PID."""
         return self.pid
 
-    def setOS(self, OS):
+    def setOS(self, OS: SmallOS) -> None:
         """Attach the task to its owning runtime."""
         self.OS = OS
 
@@ -281,7 +301,9 @@ class SmallTask(SmallSignals, Node):
             parent=parent,
         )
 
-    def spawn(self, routine, priority=None, **kwargs):
+    def spawn(
+        self, routine: TaskRoutine[Any] | SmallTask[Any], priority: int | None = None, **kwargs: Any
+    ) -> SmallTask[Any]:
         """
         Create and register a child task on the same runtime.
 
@@ -291,11 +313,12 @@ class SmallTask(SmallSignals, Node):
         if not self.OS:
             raise RuntimeError("Task must belong to an OS before it can spawn children.")
 
-        child = routine
-        if not isinstance(child, SmallTask):
+        if isinstance(routine, SmallTask):
+            child: SmallTask[Any] = routine
+            if priority is not None:
+                child.priority = priority
+        else:
             child = SmallTask(priority or self.priority, routine, **kwargs)
-        elif priority is not None:
-            child.priority = priority
 
         child.parent = self
         self.OS.fork(child)
@@ -307,20 +330,20 @@ class SmallTask(SmallSignals, Node):
         child = self.spawn(new_task)
         return child.getID()
 
-    def join(self, child):
+    def join(self, child: int | SmallTask[Any]):
         """Return the awaitable used to wait for one child task."""
         return join_instruction(child)
 
-    def join_all(self, children):
+    def join_all(self, children: Iterable[int | SmallTask[Any]]):
         """Return the awaitable used to wait for several child tasks."""
         return join_all_instruction(children)
 
-    def add_join_waiter(self, waiter):
+    def add_join_waiter(self, waiter: SmallTask[Any]) -> None:
         """Register a task that is currently waiting on this task."""
         if waiter not in self._join_waiters:
             self._join_waiters.append(waiter)
 
-    def discard_join_waiter(self, waiter):
+    def discard_join_waiter(self, waiter: SmallTask[Any]) -> None:
         """Remove a waiter once it no longer depends on this task."""
         while waiter in self._join_waiters:
             self._join_waiters.remove(waiter)
@@ -333,15 +356,15 @@ class SmallTask(SmallSignals, Node):
             return -1
         return self.OS.cancel_task(self, recursive="-r" in flags)
 
-    def getExeStatus(self):
+    def getExeStatus(self) -> bool:
         """Report whether the scheduler may run this task right now."""
         return bool(self.isReady) and not self.isLocked and not self._done
 
-    def getDelStatus(self):
+    def getDelStatus(self) -> bool:
         """Report whether the task is terminal and removable."""
         return self._done and not self.isWatcher
 
-    def stat(self):
+    def stat(self) -> str:
         """Return an expanded debug dump for shell-style inspection."""
         msg = "\nisReady={}\nisWaiting={}\nisSleep={}\n".format(
             self.isReady,
@@ -354,7 +377,7 @@ class SmallTask(SmallSignals, Node):
             msg += "exception={!r}\n".format(self.exception)
         return str(self) + msg
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Return a compact single-line summary of the task state."""
         name = self.name or "Unamed Process"
         return (

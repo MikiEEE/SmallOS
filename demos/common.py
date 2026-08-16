@@ -6,8 +6,11 @@ recommended public API: load a config file, choose a kernel, install an error
 handler, spawn tasks, and start the runtime.
 """
 
+from __future__ import annotations
+
 import os
 import sys
+from typing import Any
 
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +21,7 @@ if REPO_ROOT not in sys.path:
 from SmallPackage.SmallConfig import SmallOSConfig
 from SmallPackage.SmallOS import SmallOS
 from SmallPackage.SmallTask import SmallTask
+from SmallPackage.Kernel import Kernel
 
 
 CONFIG_PATH = os.path.join(REPO_ROOT, "smallos.config.json")
@@ -32,10 +36,18 @@ def load_demo_config(**overrides):
     return config
 
 
-def build_runtime(kernel, **config_overrides):
+def build_runtime(kernel: Kernel, **config_overrides: Any) -> SmallOS:
     """Create a ``SmallOS`` instance wired to the chosen kernel."""
     runtime = SmallOS(config=load_demo_config(**config_overrides)).setKernel(kernel)
     return install_demo_error_handler(runtime)
+
+
+def task_runtime(task: SmallTask[Any]) -> SmallOS:
+    """Return the runtime attached before a registered task is executed."""
+    runtime = task.OS
+    if runtime is None:
+        raise RuntimeError("demo task is not attached to a SmallOS runtime")
+    return runtime
 
 
 def _format_failure_event(event):
@@ -53,6 +65,13 @@ def _format_failure_event(event):
         details.append("join_target={}".format(event["join_target_id"]))
     if event["join_pending_ids"]:
         details.append("join_pending={}".format(event["join_pending_ids"]))
+    if event.get("adapter_name") is not None:
+        details.append(
+            "adapter={}#{}".format(
+                event["adapter_name"],
+                event.get("adapter_job_id"),
+            )
+        )
 
     header = "[smallOS demo] task failure"
     if event["task_name"]:
