@@ -45,6 +45,32 @@ SmallPackage = ["py.typed"]
 [tool.setuptools_scm]
 fallback_version = "0.0.0"
 
+[tool.semantic_release]
+commit_parser = "conventional"
+tag_format = "v{version}"
+version_toml = []
+version_variables = []
+
+[tool.semantic_release.branches.master]
+match = "master"
+prerelease = false
+
+[tool.semantic_release.commit_parser_options]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+other_allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "refactor",
+    "style",
+    "test",
+]
+default_bump_level = 1
+parse_squash_commits = true
+ignore_merge_commits = true
+
 [tool.pyright]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
