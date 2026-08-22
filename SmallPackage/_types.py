@@ -7,13 +7,16 @@ targets do not need to provide the :mod:`typing` module.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypedDict, TypeVar
 
 if TYPE_CHECKING:
     from .SmallOS import SmallOS
 
 
 T = TypeVar("T")
+SocketBuffer: TypeAlias = bytes | bytearray | memoryview
+SocketOperation: TypeAlias = Literal["accept", "recv", "send", "handshake"]
+SocketRetryMode: TypeAlias = Literal["read", "write"] | None
 
 
 class TaskLike(Protocol):
@@ -40,6 +43,15 @@ class KernelLike(Protocol):
         writables: Iterable[Any],
         timeout_ms: int | None = None,
     ) -> tuple[Sequence[Any], Sequence[Any]]: ...
+
+
+class SocketKernelLike(Protocol):
+    """Optional kernel boundary for operation-aware byte-stream I/O."""
+
+    def socket_send(self, sock: Any, data: SocketBuffer) -> int: ...
+    def socket_retry_mode(
+        self, exc: BaseException, operation: SocketOperation
+    ) -> SocketRetryMode: ...
 
 
 class AdapterCompletionLike(Protocol):
