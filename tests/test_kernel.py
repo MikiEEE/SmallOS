@@ -4,7 +4,7 @@ import unittest
 
 sys.path.append("..")
 
-from SmallPackage.Kernel import ESP32, ESP8266, MicroPythonKernel, PicoW, RaspberryPiPicoW, Unix, build_micropython_kernel
+from SmallPackage.Kernel import Kernel, ESP32, ESP8266, MicroPythonKernel, PicoW, RaspberryPiPicoW, Unix, build_micropython_kernel
 
 
 class FakeNIC:
@@ -172,7 +172,292 @@ class FakeSelectWithoutPoll:
     POLLOUT = 0x004
 
 
+class FailingWakeEndpoint:
+    def __init__(self, fail_setblocking=False, close_failures=0):
+        self.fail_setblocking = fail_setblocking
+        self.close_failures = close_failures
+        self.close_calls = 0
+        self.closed = False
+
+    def setblocking(self, _flag):
+        if self.fail_setblocking:
+            raise RuntimeError("setblocking failed")
+
+    def close(self):
+        self.close_calls += 1
+        if self.close_calls <= self.close_failures:
+            raise OSError("close failed")
+        self.closed = True
+
+
+class FakeSocketPairModule:
+    def __init__(self, reader, writer):
+        self.reader = reader
+        self.writer = writer
+
+    def socketpair(self):
+        return self.reader, self.writer
+
+
+class TerminalWakeWriter:
+    def __init__(self, writer, *, interrupt=False, send_zero=False, close_failures=0):
+        self.writer = writer
+        self.interrupt = interrupt
+        self.send_zero = send_zero
+        self.close_failures = close_failures
+        self.send_calls = 0
+        self.close_calls = 0
+
+    def setblocking(self, flag):
+        self.writer.setblocking(flag)
+
+    def send(self, _data):
+        self.send_calls += 1
+        if self.interrupt:
+            raise InterruptedError()
+        if self.send_zero:
+            return 0
+        raise OSError("notification failed")
+
+    def close(self):
+        self.close_calls += 1
+        if self.close_calls <= self.close_failures:
+            raise OSError("temporary close failure")
+        self.writer.close()
+
+
+class InvalidResultWakeWriter(TerminalWakeWriter):
+    def send(self, _data):
+        self.send_calls += 1
+        return None
+
+
+class InterruptingWakeReader(FailingWakeEndpoint):
+    def __init__(self):
+        super().__init__()
+        self.recv_calls = 0
+
+    def recv(self, _size):
+        self.recv_calls += 1
+        raise InterruptedError()
+
+
+class SendingWakeWriter(FailingWakeEndpoint):
+    def __init__(self):
+        super().__init__()
+        self.send_calls = 0
+
+    def send(self, data):
+        self.send_calls += 1
+        return len(data)
+
+
+class InvalidWakeReader(FailingWakeEndpoint):
+    pass
+
+
+class InvalidWakeWriter(FailingWakeEndpoint):
+    pass
+
+
 class TestKernelProfiles(unittest.TestCase):
+    def test_base_and_micropython_wakeup_capabilities_are_explicit(self):
+        base = Kernel()
+        micropython = MicroPythonKernel()
+        micropython._socket = type(
+            "SocketPairPresent",
+            (),
+            {"socketpair": staticmethod(lambda: ())},
+        )()
+
+        for kernel in (base, micropython):
+            with self.subTest(kernel=type(kernel).__name__):
+                self.assertFalse(kernel.supports_wakeup_channel())
+                with self.assertRaises(NotImplementedError):
+                    kernel.create_wakeup_channel()
+
+    def test_unix_wakeup_capability_requires_callable_socketpair(self):
+        kernel = Unix()
+        for socket_pair, expected in (
+            (None, False),
+            (object(), False),
+            (lambda: (), True),
+        ):
+            with self.subTest(socket_pair=socket_pair):
+                kernel._socket = type("SocketModule", (), {"socketpair": socket_pair})()
+                self.assertEqual(expected, kernel.supports_wakeup_channel())
+                if not expected:
+                    with self.assertRaises(NotImplementedError):
+                        kernel.create_wakeup_channel()
+
+    def test_unix_wakeup_creation_cleans_every_acquired_endpoint(self):
+        reader = FailingWakeEndpoint(close_failures=1)
+        reader.recv = lambda _size: b""
+        writer = SendingWakeWriter()
+        writer.fail_setblocking = True
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+
+        with self.assertRaisesRegex(RuntimeError, "setblocking failed"):
+            kernel.create_wakeup_channel()
+
+        self.assertEqual(1, reader.close_calls)
+        self.assertEqual(1, writer.close_calls)
+        self.assertTrue(writer.closed)
+
+    def test_unix_wakeup_creation_rejects_invalid_or_duplicate_endpoints(self):
+        cases = (
+            (InvalidWakeReader(), SendingWakeWriter()),
+            (InterruptingWakeReader(), InvalidWakeWriter()),
+        )
+        duplicate = SendingWakeWriter()
+        cases += ((duplicate, duplicate),)
+
+        for reader, writer in cases:
+            with self.subTest(reader=type(reader).__name__, writer=type(writer).__name__):
+                kernel = Unix()
+                kernel._socket = FakeSocketPairModule(reader, writer)
+                with self.assertRaises((TypeError, ValueError)):
+                    kernel.create_wakeup_channel()
+                self.assertEqual(1, reader.close_calls)
+                if writer is not reader:
+                    self.assertEqual(1, writer.close_calls)
+
+    def test_unix_wakeup_coalesces_and_reuses_notifications(self):
+        kernel = Unix()
+        channel = kernel.create_wakeup_channel()
+        try:
+            for _ in range(1000):
+                channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+
+            channel.drain()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=0)
+            self.assertEqual([], readable)
+
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+        finally:
+            channel.close()
+            channel.close()
+            channel.notify()
+            channel.drain()
+
+    def test_unix_wakeup_send_failure_becomes_readable_eof(self):
+        reader, raw_writer = socket.socketpair()
+        writer = TerminalWakeWriter(raw_writer)
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        wait_set = kernel.create_io_wait_set()
+        try:
+            wait_set.set_interest(channel.wait_object, True, False)
+            channel.notify()
+            channel.notify()
+            readable, _ = wait_set.wait(timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+            self.assertEqual(1, writer.send_calls)
+            channel.drain()
+        finally:
+            wait_set.set_interest(channel.wait_object, False, False)
+            wait_set.close()
+            channel.close()
+
+    def test_unix_wakeup_zero_send_becomes_readable_eof(self):
+        reader, raw_writer = socket.socketpair()
+        writer = TerminalWakeWriter(raw_writer, send_zero=True)
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        try:
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+            self.assertEqual(1, writer.send_calls)
+        finally:
+            channel.close()
+
+    def test_unix_wakeup_invalid_send_result_becomes_readable_eof(self):
+        reader, raw_writer = socket.socketpair()
+        writer = InvalidResultWakeWriter(raw_writer)
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        try:
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+            self.assertEqual(1, writer.send_calls)
+        finally:
+            channel.close()
+
+    def test_unix_wakeup_failed_terminal_close_remains_retryable(self):
+        reader, raw_writer = socket.socketpair()
+        writer = TerminalWakeWriter(raw_writer, close_failures=1)
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        try:
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=0)
+            self.assertEqual([], readable)
+
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+            self.assertEqual(2, writer.send_calls)
+            self.assertEqual(2, writer.close_calls)
+        finally:
+            channel.close()
+
+    def test_unix_wakeup_bounds_interrupted_notify_and_drain(self):
+        reader, raw_writer = socket.socketpair()
+        writer = TerminalWakeWriter(raw_writer, interrupt=True)
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        try:
+            channel.notify()
+            readable, _ = kernel.io_wait([channel.wait_object], [], timeout_ms=100)
+            self.assertEqual([channel.wait_object], readable)
+            self.assertEqual(8, writer.send_calls)
+        finally:
+            channel.close()
+
+        reader = InterruptingWakeReader()
+        writer = SendingWakeWriter()
+        kernel = Unix()
+        kernel._socket = FakeSocketPairModule(reader, writer)
+        channel = kernel.create_wakeup_channel()
+        try:
+            channel.notify()
+            channel.drain()
+            channel.notify()
+            self.assertEqual(8, reader.recv_calls)
+            self.assertEqual(1, writer.send_calls)
+        finally:
+            channel.close()
+
+    def test_closed_unix_wakeup_detaches_from_persistent_wait_set(self):
+        kernel = Unix()
+        channel = kernel.create_wakeup_channel()
+        wait_set = kernel.create_io_wait_set()
+        wait_object = channel.wait_object
+        try:
+            wait_set.set_interest(wait_object, True, False)
+            channel.notify()
+            readable, _ = wait_set.wait(timeout_ms=100)
+            self.assertEqual([wait_object], readable)
+
+            channel.close()
+            wait_set.set_interest(wait_object, False, False)
+            self.assertEqual(([], []), wait_set.wait(timeout_ms=0))
+        finally:
+            channel.close()
+            wait_set.close()
+
     def test_build_micropython_kernel_detects_esp32_profile(self):
         kernel = build_micropython_kernel(machine_name="ESP32 module with ESP32")
 

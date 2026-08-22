@@ -42,6 +42,24 @@ class KernelLike(Protocol):
     ) -> tuple[Sequence[Any], Sequence[Any]]: ...
 
 
+class WakeupChannelLike(Protocol):
+    """Opaque readiness channel used to wake a scheduler across threads."""
+
+    @property
+    def wait_object(self) -> Any: ...
+
+    def notify(self) -> None: ...
+    def drain(self) -> None: ...
+    def close(self) -> None: ...
+
+
+class WakeupKernelLike(Protocol):
+    """Optional kernel boundary for cross-thread scheduler wakeups."""
+
+    def supports_wakeup_channel(self) -> bool: ...
+    def create_wakeup_channel(self) -> WakeupChannelLike: ...
+
+
 class AdapterCompletionLike(Protocol):
     """Structural completion record consumed by the scheduler."""
 
