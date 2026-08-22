@@ -1292,7 +1292,7 @@ class SmallOS(SmallIO):
 
     def __str__(self) -> str:
         """Return a human-readable dump of the currently registered tasks."""
-        all_tasks = list(self.tasks.tasks)
+        all_tasks = self.tasks.list()
         string = "SmallOS\n"
         for count, routine in enumerate(all_tasks):
             string += str(count + 1) + ". " + str(routine) + "\n"
