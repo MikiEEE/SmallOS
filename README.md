@@ -223,6 +223,35 @@ If you do not install an error handler, the task still fails cleanly and the
 runtime keeps its internal state consistent, but adding `setErrorHandler(...)`
 is the recommended way to make these failures visible in applications.
 
+### Waking a Blocked Scheduler from Another Thread
+
+Kernels may provide an opaque wakeup channel for code that must request work
+such as server shutdown while the scheduler is blocked in I/O readiness:
+
+```python
+kernel = Unix()
+if not kernel.supports_wakeup_channel():
+    raise RuntimeError("cross-thread scheduler wakeup is unavailable")
+
+wakeup = kernel.create_wakeup_channel()
+
+async def watch_shutdown(task):
+    await task.wait_readable(wakeup.wait_object)
+    wakeup.drain()
+    # Apply the application-owned shutdown request on the scheduler thread.
+```
+
+Call `wakeup.notify()` from the external thread. Notifications are nonblocking
+and coalesce until the scheduler calls `drain()`. The owner must call `close()`
+after its scheduler wait has been detached; repeated close, notify, and drain
+calls during teardown are safe.
+
+`Unix` supports this contract when its socket module provides a callable
+`socketpair()`. Generic `MicroPythonKernel` deliberately reports it unsupported:
+a polling backend or socket-pair-shaped attribute alone does not establish safe
+cross-thread behavior on a constrained port. TCP serving and shutdown initiated
+by a task already running on the scheduler do not require this capability.
+
 ## Configuration
 
 The runtime now uses a first-class config object backed by
@@ -459,6 +488,15 @@ For MicroPython targets, the intended flow is:
 The kernel layer is deliberately generic. Protocol clients such as HTTPS,
 Redis, MQTT, RabbitMQ/AMQP, and Kafka should be built on top of the shared
 TCP/TLS socket surface rather than requiring protocol-specific kernel methods.
+
+Passive TCP consumers use the kernel boundary as well: check
+`supports_tcp_server()` before resolving or opening anything, pass the opaque
+record returned by `resolve_passive_address()` unchanged to both `socket_open()`
+and `socket_bind()`, then use the kernel's listen, accept, address-inspection,
+and close operations. Address reuse has its own capability check because some
+MicroPython ports support listeners without exposing `SO_REUSEADDR` constants.
+The web app demo shows the complete setup and rollback pattern without importing
+platform socket APIs.
 
 ## Clients
 
