@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
     from .SmallOS import SmallOS
     from .SmallTask import SmallTask
-    from .TaskState import TaskState
     from .awaitables import InstructionAwaitable
 
 from .awaitables import (
@@ -57,7 +56,6 @@ class SmallSignals:
 
     if TYPE_CHECKING:
         OS: SmallOS | None
-        state: TaskState
 
     def __init__(self, OS: SmallOS | None, kwargs: dict[str, Any]) -> None:
         """
@@ -141,32 +139,17 @@ class SmallSignals:
             self.handlers(self)
         return 0
 
-    def sleep(
-        self, secs: float, state_blob: dict[Any, Any] | None = None
-    ) -> InstructionAwaitable[None]:
-        """
-        Return the awaitable used for cooperative sleeping.
-
-        ``state_blob`` is preserved for compatibility with the older API style,
-        where suspension helpers could stash task-local state before yielding.
-        """
-        if state_blob is not None:
-            self.state.update(state_blob)
+    def sleep(self, secs: float) -> InstructionAwaitable[None]:
+        """Return the awaitable used for cooperative sleeping."""
         return sleep_instruction(secs)
 
-    def wait_signal(
-        self, sig: int, state_blob: dict[Any, Any] | None = None
-    ) -> InstructionAwaitable[int]:
+    def wait_signal(self, sig: int) -> InstructionAwaitable[int]:
         """Return the awaitable used to wait until ``sig`` is delivered."""
-        if state_blob is not None:
-            self.state.update(state_blob)
         return wait_signal_instruction(sig)
 
-    def sigSuspendV2(
-        self, sig: int, state_blob: dict[Any, Any] | None = None
-    ) -> InstructionAwaitable[int]:
+    def sigSuspendV2(self, sig: int) -> InstructionAwaitable[int]:
         """Compatibility alias for the older generator-era suspension name."""
-        return self.wait_signal(sig, state_blob)
+        return self.wait_signal(sig)
 
     def yield_now(self) -> InstructionAwaitable[None]:
         """Return the awaitable used for an explicit cooperative yield."""
