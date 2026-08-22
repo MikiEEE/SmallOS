@@ -25,10 +25,37 @@ if TYPE_CHECKING:
 	from collections.abc import Iterable, Mapping, Sequence
 	from typing import Any, cast
 	from ._types import WakeupChannelLike
+	from ._types import SocketBuffer, SocketOperation, SocketRetryMode
 
 
 _UNSET = object()
 _MAX_WAKEUP_IO_ATTEMPTS = 8
+_SOCKET_OPERATIONS = ('accept', 'recv', 'send', 'handshake')
+
+
+def _validate_socket_operation(operation):
+	"""Reject retry classifications that do not name a supported operation."""
+	if operation not in _SOCKET_OPERATIONS:
+		raise ValueError(
+			'Unknown socket operation {!r}; expected one of: {}.'.format(
+				operation, ', '.join(_SOCKET_OPERATIONS)
+			)
+		)
+
+
+class _PassiveAddressInfo:
+	"""Kernel-owned address record for a passive TCP endpoint."""
+
+	def __init__(self, owner, address_info):
+		self.owner = owner
+		self.address_info = address_info
+
+
+def _unwrap_passive_address(owner, address_info):
+	"""Return backend address data only for a record created by ``owner``."""
+	if not isinstance(address_info, _PassiveAddressInfo) or address_info.owner is not owner:
+		raise ValueError('Passive address record belongs to a different kernel.')
+	return address_info.address_info
 
 
 def _import_first(*module_names: str) -> Any | None:
@@ -633,6 +660,14 @@ class Kernel:
 		"""Create an opaque cross-thread scheduler wakeup channel."""
 		raise NotImplementedError('Cross-thread wakeup channels are not supported.')
 
+	def supports_tcp_server(self) -> bool:
+		"""Whether this kernel implements the complete passive TCP contract."""
+		return False
+
+	def supports_reuse_address(self) -> bool:
+		"""Whether this kernel can configure address reuse on a listener."""
+		return False
+
 	def validate_io_wait_object(
 		self, obj: Any
 	) -> tuple[bool, BaseException | None]:
@@ -665,11 +700,32 @@ class Kernel:
 	def resolve_address(self, host: str, port: int) -> Any:
 		return None
 
+	def resolve_passive_address(self, host: str, port: int) -> Any:
+		raise NotImplementedError('Passive TCP address resolution is not supported.')
+
 	def socket_open(self, address_info: Any) -> Any:
-		return None
+		raise NotImplementedError('TCP sockets are not supported.')
 
 	def socket_setblocking(self, sock: Any, flag: bool) -> None:
-		return
+		raise NotImplementedError('TCP sockets are not supported.')
+
+	def socket_set_reuse_address(self, sock: Any, enabled: bool) -> None:
+		raise NotImplementedError('TCP address reuse is not supported.')
+
+	def socket_bind(self, sock: Any, address_info: Any) -> None:
+		raise NotImplementedError('TCP listeners are not supported.')
+
+	def socket_listen(self, sock: Any, backlog: int) -> None:
+		raise NotImplementedError('TCP listeners are not supported.')
+
+	def socket_accept(self, listener: Any) -> tuple[Any, Any]:
+		raise NotImplementedError('TCP listeners are not supported.')
+
+	def socket_local_address(self, sock: Any) -> Any:
+		raise NotImplementedError('Socket address inspection is not supported.')
+
+	def socket_peer_address(self, sock: Any) -> Any | None:
+		raise NotImplementedError('Socket address inspection is not supported.')
 
 	def socket_connect(self, sock: Any, sockaddr: Any) -> bool:
 		return True
@@ -677,14 +733,15 @@ class Kernel:
 	def socket_connection_error(self, sock: Any) -> int:
 		return 0
 
-	def socket_send(self, sock: Any, data: bytes) -> int:
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
+		"""Send a bytes-like buffer without requiring an intermediate copy."""
 		return 0
 
 	def socket_recv(self, sock: Any, buffer_size: int) -> bytes:
 		return b''
 
 	def socket_close(self, sock: Any) -> None:
-		return
+		raise NotImplementedError('TCP sockets are not supported.')
 
 	def socket_wrap_tls_client(
 		self,
@@ -713,6 +770,17 @@ class Kernel:
 
 	def socket_needs_write(self, exc: BaseException) -> bool:
 		return False
+
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		"""Return the readiness direction needed to retry one socket operation."""
+		_validate_socket_operation(operation)
+		if self.socket_needs_write(exc):
+			return 'write'
+		if self.socket_needs_read(exc):
+			return 'write' if operation == 'send' else 'read'
+		return None
 
 	def _poll_lookup_key(self, obj: Any) -> Any:
 		"""
@@ -922,16 +990,71 @@ class Unix(Kernel):
 			raise
 		return _SocketWakeupChannel(reader, writer, lock)
 
+	def supports_tcp_server(self) -> bool:
+		return True
+
+	def supports_reuse_address(self) -> bool:
+		return (
+			hasattr(self._socket, 'SOL_SOCKET')
+			and hasattr(self._socket, 'SO_REUSEADDR')
+			and callable(getattr(self._socket.socket, 'setsockopt', None))
+		)
+
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port, type=self._socket.SOCK_STREAM)[0]
 
+	def resolve_passive_address(self, host, port):
+		passive_host = None if host == '' else host
+		address_info = self._socket.getaddrinfo(
+			passive_host,
+			port,
+			type=self._socket.SOCK_STREAM,
+			flags=self._socket.AI_PASSIVE,
+		)[0]
+		return _PassiveAddressInfo(self, address_info)
+
 	def socket_open(self, address_info):
+		if isinstance(address_info, _PassiveAddressInfo):
+			address_info = _unwrap_passive_address(self, address_info)
 		family, socktype, proto, _, _ = address_info
 		return self._socket.socket(family, socktype, proto)
 
 	def socket_setblocking(self, sock, flag):
 		sock.setblocking(flag)
 		return
+
+	def socket_set_reuse_address(self, sock, enabled):
+		if not self.supports_reuse_address():
+			raise NotImplementedError('SO_REUSEADDR is not supported on this platform.')
+		sock.setsockopt(
+			self._socket.SOL_SOCKET,
+			self._socket.SO_REUSEADDR,
+			1 if enabled else 0,
+		)
+		return
+
+	def socket_bind(self, sock, address_info):
+		address_info = _unwrap_passive_address(self, address_info)
+		sock.bind(address_info[4])
+		return
+
+	def socket_listen(self, sock, backlog):
+		sock.listen(backlog)
+		return
+
+	def socket_accept(self, listener):
+		return listener.accept()
+
+	def socket_local_address(self, sock):
+		return sock.getsockname()
+
+	def socket_peer_address(self, sock):
+		try:
+			return sock.getpeername()
+		except OSError as exc:
+			if self._extract_errno(exc) == self._errno.ENOTCONN:
+				return None
+			raise
 
 	def socket_connect(self, sock, sockaddr):
 		err = sock.connect_ex(sockaddr)
@@ -952,7 +1075,7 @@ class Unix(Kernel):
 	def socket_connection_error(self, sock):
 		return sock.getsockopt(self._socket.SOL_SOCKET, self._socket.SO_ERROR)
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
 		return sock.send(data)
 
 	def socket_recv(self, sock, buffer_size):
@@ -997,6 +1120,25 @@ class Unix(Kernel):
 	def socket_needs_write(self, exc):
 		return isinstance(exc, self._ssl.SSLWantWriteError)
 
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		_validate_socket_operation(operation)
+		if isinstance(exc, self._ssl.SSLWantReadError):
+			return 'read'
+		if isinstance(exc, self._ssl.SSLWantWriteError):
+			return 'write'
+		would_block = {
+			value for value in (
+				getattr(self._errno, 'EAGAIN', None),
+				getattr(self._errno, 'EWOULDBLOCK', None),
+			) if value is not None
+		}
+		err = self._extract_errno(exc)
+		if err in would_block or (isinstance(exc, BlockingIOError) and err is None):
+			return 'write' if operation == 'send' else 'read'
+		return None
+
 
 class MicroPythonKernel(Kernel):
 	'''
@@ -1034,6 +1176,7 @@ class MicroPythonKernel(Kernel):
 			self._ssl = _import_first('ssl', 'ussl')
 		self._sys = modules.get('sys') or _import_first('sys')
 		self._os = modules.get('os') or _import_first('os')
+		self._errno = modules.get('errno') or _import_first('errno', 'uerrno')
 		self._network = modules.get('network') or _import_first('network')
 		self._rp2 = modules.get('rp2') or _import_first('rp2')
 		self._machine = modules.get('machine') or _import_first('machine')
@@ -1132,16 +1275,134 @@ class MicroPythonKernel(Kernel):
 			'Cross-thread wakeup channels are not supported by MicroPythonKernel.'
 		)
 
+	def supports_tcp_server(self) -> bool:
+		if not callable(getattr(self._socket, 'getaddrinfo', None)):
+			return False
+		socket_factory = getattr(self._socket, 'socket', None)
+		if not callable(socket_factory):
+			return False
+		required = (
+			'setblocking', 'bind', 'listen', 'accept', 'getsockname',
+			'getpeername', 'send', 'recv', 'close',
+		)
+		return all(callable(getattr(socket_factory, name, None)) for name in required)
+
+	def supports_reuse_address(self) -> bool:
+		socket_factory = getattr(self._socket, 'socket', None)
+		return (
+			hasattr(self._socket, 'SOL_SOCKET')
+			and hasattr(self._socket, 'SO_REUSEADDR')
+			and callable(getattr(socket_factory, 'setsockopt', None))
+		)
+
 	def resolve_address(self, host, port):
 		return self._socket.getaddrinfo(host, port)[0]
 
+	def resolve_passive_address(self, host, port):
+		if not self.supports_tcp_server():
+			raise NotImplementedError('TCP server support is not available on this port.')
+		passive_host = '0.0.0.0' if host == '' else host
+		sock_stream = getattr(self._socket, 'SOCK_STREAM', None)
+		ai_passive = getattr(self._socket, 'AI_PASSIVE', None)
+		attempts = []
+		if sock_stream is not None and ai_passive is not None:
+			attempts.append((passive_host, port, 0, sock_stream, 0, ai_passive))
+		if sock_stream is not None:
+			attempts.append((passive_host, port, 0, sock_stream))
+		attempts.append((passive_host, port))
+		last_error = None
+		for arguments in attempts:
+			try:
+				resolved = self._socket.getaddrinfo(*arguments)[0]
+				break
+			except TypeError as exc:
+				last_error = exc
+		else:
+			if last_error is None:
+				raise RuntimeError('Passive TCP address resolution did not run.')
+			raise last_error
+		return _PassiveAddressInfo(self, resolved)
+
 	def socket_open(self, address_info):
+		is_passive = isinstance(address_info, _PassiveAddressInfo)
+		if is_passive:
+			address_info = _unwrap_passive_address(self, address_info)
 		family, socktype, proto, _, _ = address_info
-		return self._socket.socket(family, socktype, proto)
+		sock = self._socket.socket(family, socktype, proto)
+		if not is_passive:
+			return sock
+		required = (
+			'setblocking', 'bind', 'listen', 'accept', 'getsockname',
+			'getpeername', 'send', 'recv', 'close',
+		)
+		missing = [name for name in required if not callable(getattr(sock, name, None))]
+		if not missing:
+			return sock
+		closer = getattr(sock, 'close', None)
+		if callable(closer):
+			try:
+				closer()
+			except BaseException:
+				pass
+		raise NotImplementedError(
+			'TCP server socket is missing required operations: {}.'.format(', '.join(missing))
+		)
 
 	def socket_setblocking(self, sock, flag):
 		sock.setblocking(flag)
 		return
+
+	def socket_set_reuse_address(self, sock, enabled):
+		if not self.supports_reuse_address():
+			raise NotImplementedError('SO_REUSEADDR is not supported on this port.')
+		setter = getattr(sock, 'setsockopt', None)
+		if not callable(setter):
+			raise NotImplementedError('Socket instance does not support SO_REUSEADDR.')
+		setter(
+			self._socket.SOL_SOCKET,
+			self._socket.SO_REUSEADDR,
+			1 if enabled else 0,
+		)
+		return
+
+	def socket_bind(self, sock, address_info):
+		address_info = _unwrap_passive_address(self, address_info)
+		binder = getattr(sock, 'bind', None)
+		if not callable(binder):
+			raise NotImplementedError('TCP bind is not supported on this port.')
+		binder(address_info[4])
+		return
+
+	def socket_listen(self, sock, backlog):
+		listener = getattr(sock, 'listen', None)
+		if not callable(listener):
+			raise NotImplementedError('TCP listen is not supported on this port.')
+		listener(backlog)
+		return
+
+	def socket_accept(self, listener):
+		acceptor = getattr(listener, 'accept', None)
+		if not callable(acceptor):
+			raise NotImplementedError('TCP accept is not supported on this port.')
+		return acceptor()
+
+	def socket_local_address(self, sock):
+		getter = getattr(sock, 'getsockname', None)
+		if not callable(getter):
+			raise NotImplementedError('Local address inspection is not supported.')
+		return getter()
+
+	def socket_peer_address(self, sock):
+		getter = getattr(sock, 'getpeername', None)
+		if not callable(getter):
+			raise NotImplementedError('Peer address inspection is not supported.')
+		try:
+			return getter()
+		except OSError as exc:
+			not_connected = getattr(self._errno, 'ENOTCONN', None)
+			if not_connected is not None and self._extract_errno(exc) == not_connected:
+				return None
+			raise
 
 	def socket_connect(self, sock, sockaddr):
 		try:
@@ -1153,7 +1414,7 @@ class MicroPythonKernel(Kernel):
 			pending = {
 				115, 11,
 			}
-			if err in pending or self.socket_needs_read(exc) or self.socket_needs_write(exc):
+			if err in pending or isinstance(exc, BlockingIOError):
 				return False
 			raise
 
@@ -1162,7 +1423,7 @@ class MicroPythonKernel(Kernel):
 		so_error = getattr(self._socket, 'SO_ERROR', 4)
 		return sock.getsockopt(sol_socket, so_error)
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
 		return sock.send(data)
 
 	def socket_recv(self, sock, buffer_size):
@@ -1245,6 +1506,27 @@ class MicroPythonKernel(Kernel):
 		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
 			return True
 		return False
+
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		_validate_socket_operation(operation)
+		want_read_error = getattr(self._ssl, 'SSLWantReadError', None)
+		if isinstance(want_read_error, type) and isinstance(exc, want_read_error):
+			return 'read'
+		want_write_error = getattr(self._ssl, 'SSLWantWriteError', None)
+		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
+			return 'write'
+		err = self._extract_errno(exc)
+		pending = {11}
+		if self._errno is not None:
+			for name in ('EAGAIN', 'EWOULDBLOCK'):
+				value = getattr(self._errno, name, None)
+				if value is not None:
+					pending.add(value)
+		if err in pending or (isinstance(exc, BlockingIOError) and err is None):
+			return 'write' if operation == 'send' else 'read'
+		return None
 
 	def machine_name(self):
 		'''

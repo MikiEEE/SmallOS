@@ -489,6 +489,15 @@ The kernel layer is deliberately generic. Protocol clients such as HTTPS,
 Redis, MQTT, RabbitMQ/AMQP, and Kafka should be built on top of the shared
 TCP/TLS socket surface rather than requiring protocol-specific kernel methods.
 
+Passive TCP consumers use the kernel boundary as well: check
+`supports_tcp_server()` before resolving or opening anything, pass the opaque
+record returned by `resolve_passive_address()` unchanged to both `socket_open()`
+and `socket_bind()`, then use the kernel's listen, accept, address-inspection,
+and close operations. Address reuse has its own capability check because some
+MicroPython ports support listeners without exposing `SO_REUSEADDR` constants.
+The web app demo shows the complete setup and rollback pattern without importing
+platform socket APIs.
+
 ## Clients
 
 The current setup now includes first-party smallOS-native helpers for HTTP,
