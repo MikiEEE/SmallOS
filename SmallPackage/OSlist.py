@@ -6,7 +6,7 @@ The runtime needs two different access patterns:
 - choose the next runnable task by priority
 
 This module keeps those responsibilities together so the scheduler can stay
-small and focused. PID lookup uses a sorted list, ready tasks live in one FIFO
+small and focused. PID lookup uses a dictionary, ready tasks live in one FIFO
 queue per priority, and sleeping tasks live in a wake-time heap.
 """
 
@@ -25,37 +25,67 @@ if TYPE_CHECKING:
 
     from .SmallTask import SmallTask
 
-from .list_util.binSearchList import insert, search
-from .SmallPID import SmallPID
 
-
-class OSList(SmallPID):
+class OSList:
     """
     Combined PID registry and queue manager for the cooperative scheduler.
     """
 
     def __init__(self, priors: int = 5, length: int = 2**12) -> None:
         """Create the PID registry plus ready/sleep queue structures."""
-        SmallPID.__init__(self, length)
         self.num_priorities = priors
-        self.tasks = []
-        self.ready = [deque() for _ in range(priors)]
-        self.sleeping = []
+        self.maxPID = length
+        self._next_pid = 0
+        self._tasks_by_pid: dict[int, SmallTask] = {}
+        # MicroPython requires both an iterable and maxlen. The total task
+        # capacity is also a safe bound for each queue because a task can be
+        # present in at most one ready queue once.
+        self.ready: list[deque[SmallTask]] = [deque((), length) for _ in range(priors)]
+        self.sleeping: list[tuple[int, int, SmallTask]] = []
         self._sleep_seq = 0
         self.numWatchers = 0
-        self.func = lambda data, index: data[index].getID()
 
-    def resetCatSel(self):
+    def resetCatSel(self) -> None:
         """Compatibility no-op kept for older callers."""
         return
 
+    def _new_pid(self) -> int:
+        """Return the next free PID from the bounded PID namespace."""
+        if len(self._tasks_by_pid) >= self.maxPID:
+            return -1
+
+        pid = self._next_pid
+        while pid in self._tasks_by_pid:
+            pid = (pid + 1) % self.maxPID
+        self._next_pid = (pid + 1) % self.maxPID
+        return pid
+
+    def _is_registered(self, task: SmallTask) -> bool:
+        """Check task identity as well as PID to reject stale reused-PID entries."""
+        return self._tasks_by_pid.get(task.getID()) is task
+
+    def _remove_ready_entry(self, task: SmallTask) -> None:
+        """Eagerly remove a deleted task so bounded queues cannot retain garbage."""
+        if not task._queued:
+            return
+
+        priority = task.priority
+        queue = self.ready[priority]
+        retained: deque[SmallTask] = deque((), self.maxPID)
+        while queue:
+            queued = queue.popleft()
+            if queued is not task:
+                retained.append(queued)
+        self.ready[priority] = retained
+        task._queued = False
+
     def insert(self, task: SmallTask) -> int:
-        """Assign a PID and register a task in the PID-sorted backing list."""
+        """Assign a PID and register a task in the PID mapping."""
         priority = task.priority
         if not 0 < priority < self.num_priorities:
             return -1
 
-        pid = self.newPID()
+        pid = self._new_pid()
         if pid == -1:
             return -1
 
@@ -63,30 +93,23 @@ class OSList(SmallPID):
         if task.isWatcher:
             self.numWatchers += 1
 
-        index = insert(self.tasks, pid, 0, len(self.tasks), func=self.func)
-        self.tasks.insert(index, task)
+        self._tasks_by_pid[pid] = task
         return pid
 
     def search(self, pid: int) -> SmallTask | Literal[-1]:
         """Look up a task by PID."""
-        length = len(self.tasks)
-        index = search(self.tasks, pid, 0, length, self.func)
-        if index == -1:
-            return -1
-        return self.tasks[index]
+        return self._tasks_by_pid.get(pid, -1)
 
     def delete(self, pid: int) -> int:
         """Remove a task from PID storage and watcher accounting."""
-        length = len(self.tasks)
-        index = search(self.tasks, pid, 0, length, self.func)
-        if index == -1:
+        task = self._tasks_by_pid.get(pid)
+        if task is None:
             return -1
 
-        task = self.tasks[index]
+        self._remove_ready_entry(task)
         if task.isWatcher:
             self.numWatchers -= 1
-        del self.tasks[index]
-        self.freePID(pid)
+        del self._tasks_by_pid[pid]
         return 0
 
     def enqueue(self, task: SmallTask, front: bool = False) -> int:
@@ -98,7 +121,7 @@ class OSList(SmallPID):
         """
         if task == -1 or task is None or task.done:
             return -1
-        if self.search(task.getID()) == -1:
+        if not self._is_registered(task):
             return -1
         if task._queued:
             return 0
@@ -123,7 +146,7 @@ class OSList(SmallPID):
             while queue:
                 task = queue.popleft()
                 task._queued = False
-                if self.search(task.getID()) == -1:
+                if not self._is_registered(task):
                     continue
                 if not task.getExeStatus():
                     continue
@@ -136,7 +159,7 @@ class OSList(SmallPID):
             queue = self.ready[priority]
             while queue:
                 task = queue[0]
-                if self.search(task.getID()) != -1 and task.getExeStatus():
+                if self._is_registered(task) and task.getExeStatus():
                     return True
                 queue.popleft()
                 task._queued = False
@@ -157,7 +180,7 @@ class OSList(SmallPID):
         ready = []
         while self.sleeping and self.sleeping[0][0] <= now:
             _, _, task = heapq.heappop(self.sleeping)
-            if self.search(task.getID()) == -1:
+            if not self._is_registered(task):
                 continue
             if task.done or task._blocked_reason != "sleep":
                 continue
@@ -168,7 +191,7 @@ class OSList(SmallPID):
         """Peek at the next valid wake time, discarding stale heap entries."""
         while self.sleeping:
             wake_time, _, task = self.sleeping[0]
-            if self.search(task.getID()) == -1 or task.done or task._blocked_reason != "sleep":
+            if not self._is_registered(task) or task.done or task._blocked_reason != "sleep":
                 heapq.heappop(self.sleeping)
                 continue
             return wake_time
@@ -176,16 +199,16 @@ class OSList(SmallPID):
 
     def list(self) -> list[SmallTask]:
         """Return a snapshot list of currently registered tasks."""
-        return [task for task in self.tasks]
+        return [self._tasks_by_pid[pid] for pid in sorted(self._tasks_by_pid)]
 
     def isOnlyWatchers(self) -> bool:
         """Report whether every remaining task is marked as a watcher."""
-        return len(self.tasks) == self.numWatchers
+        return len(self._tasks_by_pid) == self.numWatchers
 
     def __len__(self) -> int:
         """Return the number of registered tasks."""
-        return len(self.tasks)
+        return len(self._tasks_by_pid)
 
     def __str__(self) -> str:
         """Return a newline-separated dump of all known tasks."""
-        return "\n".join([str(x) for x in self.tasks])
+        return "\n".join(str(task) for task in self.list())
