@@ -874,6 +874,8 @@ class Unix(Kernel):
 		acquired = []
 		try:
 			pair = socket_pair()
+			if TYPE_CHECKING:
+				pair = cast("Any", pair)
 			iterator = iter(pair)
 			reader = next(iterator)
 			acquired.append(reader)
