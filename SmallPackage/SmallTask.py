@@ -29,7 +29,6 @@ from .awaitables import join_instruction, join_all_instruction
 from .SmallErrors import PIDError, TaskCancelledError
 from .SmallSignals import SmallSignals
 from .list_util.linkedList import Node
-from .TaskState import TaskState
 
 
 _MISSING = object()
@@ -60,7 +59,6 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self.isWatcher = False
         self.parent = None
         self.OS: SmallOS | None = None
-        self.state = TaskState()
         self.children = []
         self.name = ""
         self.args = ()
@@ -87,8 +85,6 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self._adapter_job_id: int | None = None
         self._adapter_resume_name: str | None = None
         self._adapter_resume_job_id: int | None = None
-
-        self.state.update({"return_status": 0}, "system")
 
         SmallSignals.__init__(self, self.OS, kwargs)
 
@@ -220,7 +216,6 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self.isReady = 0
         self.isWaiting = 0
         self.isSleep = 0
-        self.state.update({"return_status": 0, "result": result}, "system")
         return result
 
     def fail(self, exc: BaseException) -> BaseException:
@@ -230,7 +225,6 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self.isReady = 0
         self.isWaiting = 0
         self.isSleep = 0
-        self.state.update({"return_status": -1, "exception": exc}, "system")
         return exc
 
     def cancel(self, message: str = "Task cancelled") -> None:
@@ -270,7 +264,6 @@ class SmallTask(SmallSignals, Node, Generic[T] if TYPE_CHECKING else object):
         self.isReady = 0
         self.isWaiting = 1 if reason in ("signal", "join", "join_all", "adapter") else 0
         self.isSleep = 1 if reason == "sleep" else 0
-        self.state.update({"return_status": 1, "blocked_reason": reason}, "system")
 
     def setID(self, pid: int) -> None:
         """Assign the PID chosen by ``SmallOS`` exactly once."""
