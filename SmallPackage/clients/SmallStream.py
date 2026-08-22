@@ -100,10 +100,11 @@ class SmallStream:
                         kernel.socket_do_handshake(sock)
                         break
                     except Exception as exc:
-                        if kernel.socket_needs_read(exc):
+                        retry_mode = kernel.socket_retry_mode(exc, "handshake")
+                        if retry_mode == "read":
                             await self.task.wait_readable(sock)
                             continue
-                        if kernel.socket_needs_write(exc):
+                        if retry_mode == "write":
                             await self.task.wait_writable(sock)
                             continue
                         raise
@@ -135,7 +136,7 @@ class SmallStream:
         if not self._connected or self.sock is None:
             await self.connect()
 
-        view = memoryview(bytes(data))
+        view = data if isinstance(data, memoryview) else memoryview(data)
         while view:
             try:
                 sent = self.kernel.socket_send(self.sock, view)
@@ -143,10 +144,11 @@ class SmallStream:
                     raise StreamClosedError("socket closed while sending data")
                 view = view[sent:]
             except Exception as exc:
-                if self.kernel.socket_needs_read(exc):
+                retry_mode = self.kernel.socket_retry_mode(exc, "send")
+                if retry_mode == "read":
                     await self.task.wait_readable(self.sock)
                     continue
-                if self.kernel.socket_needs_write(exc):
+                if retry_mode == "write":
                     await self.task.wait_writable(self.sock)
                     continue
                 raise
@@ -164,10 +166,11 @@ class SmallStream:
                     raise StreamClosedError("socket closed while reading data")
                 return bytes(chunk)
             except Exception as exc:
-                if self.kernel.socket_needs_read(exc):
+                retry_mode = self.kernel.socket_retry_mode(exc, "recv")
+                if retry_mode == "read":
                     await self.task.wait_readable(self.sock)
                     continue
-                if self.kernel.socket_needs_write(exc):
+                if retry_mode == "write":
                     await self.task.wait_writable(self.sock)
                     continue
                 raise
