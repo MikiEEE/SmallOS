@@ -342,34 +342,64 @@ async def metrics_task(task, state):
         await task.sleep(METRICS_INTERVAL_SECONDS)
 
 
+def _close_after_setup_failure(kernel, stream):
+    """Best-effort rollback that never replaces the setup exception."""
+    try:
+        kernel.socket_close(stream)
+    except BaseException:
+        pass
+
+
+def _open_listener(kernel, host, port, backlog):
+    """Construct one listener entirely through the passive TCP kernel contract."""
+    if not kernel.supports_tcp_server():
+        raise NotImplementedError("This kernel does not support passive TCP servers.")
+
+    address_info = kernel.resolve_passive_address(host, port)
+    listener = kernel.socket_open(address_info)
+    try:
+        if kernel.supports_reuse_address():
+            kernel.socket_set_reuse_address(listener, True)
+        kernel.socket_bind(listener, address_info)
+        kernel.socket_listen(listener, backlog)
+        kernel.socket_setblocking(listener, False)
+    except BaseException:
+        _close_after_setup_failure(kernel, listener)
+        raise
+    return listener
+
+
+def _dispatch_client(task, client_sock, client_addr, state):
+    """Transfer one accepted stream to a handler or roll it back exactly once."""
+    kernel = task.OS.kernel
+    try:
+        kernel.socket_setblocking(client_sock, False)
+        task.spawn(
+            web_client_handler,
+            priority=max(1, task.priority - 1),
+            name="http_client",
+            args=(client_sock, client_addr, state),
+        )
+    except BaseException:
+        _close_after_setup_failure(kernel, client_sock)
+        raise
+
+
 async def web_server_task(task, state):
     """Run a small cooperative HTTP server on one non-blocking listener."""
     kernel = task.OS.kernel
     if kernel is None:
         raise RuntimeError("web_server_task requires a kernel-enabled runtime.")
 
-    address_info = kernel.resolve_address(HOST, PORT)
-    listener = kernel.socket_open(address_info)
-
-    # Reuse address when available so restarting the demo is less annoying.
-    if hasattr(listener, "setsockopt") and hasattr(listener, "SOL_SOCKET") and hasattr(listener, "SO_REUSEADDR"):
-        try:
-            listener.setsockopt(listener.SOL_SOCKET, listener.SO_REUSEADDR, 1)
-        except Exception:
-            pass
-
-    listener.bind(address_info[4])
-    listener.listen(LISTEN_BACKLOG)
-    kernel.socket_setblocking(listener, False)
-
-    task.OS.print("smallOS web app running on http://{}:{}/\n".format(HOST, PORT))
-    task.OS.print("routes: /  /api/stats  /api/time  /healthz\n")
-    task.OS.print("web_server PID: {}\n".format(task.getID()))
-
+    listener = _open_listener(kernel, HOST, PORT, LISTEN_BACKLOG)
     try:
+        task.OS.print("smallOS web app running on http://{}:{}/\n".format(HOST, PORT))
+        task.OS.print("routes: /  /api/stats  /api/time  /healthz\n")
+        task.OS.print("web_server PID: {}\n".format(task.getID()))
+
         while True:
             try:
-                client_sock, client_addr = listener.accept()
+                client_sock, client_addr = kernel.socket_accept(listener)
             except Exception as exc:
                 retry_mode = kernel.socket_retry_mode(exc, "accept")
                 if retry_mode == "read":
@@ -380,16 +410,10 @@ async def web_server_task(task, state):
                     continue
                 raise
 
-            kernel.socket_setblocking(client_sock, False)
-            task.spawn(
-                web_client_handler,
-                priority=max(1, task.priority - 1),
-                name="http_client",
-                args=(client_sock, client_addr, state),
-            )
+            _dispatch_client(task, client_sock, client_addr, state)
             await task.yield_now()
     finally:
-        kernel.socket_close(listener)
+        _close_after_setup_failure(kernel, listener)
 
 
 def main():
