@@ -24,10 +24,12 @@ except ImportError:  # pragma: no cover - exercised on constrained runtimes
 if TYPE_CHECKING:
 	from collections.abc import Iterable, Mapping, Sequence
 	from typing import Any, cast
+	from ._types import WakeupChannelLike
 	from ._types import SocketBuffer, SocketOperation, SocketRetryMode
 
 
 _UNSET = object()
+_MAX_WAKEUP_IO_ATTEMPTS = 8
 _SOCKET_OPERATIONS = ('accept', 'recv', 'send', 'handshake')
 
 
@@ -396,6 +398,117 @@ class _PollIOWaitSet:
 		self._closed = True
 
 
+class _SocketWakeupChannel:
+	"""Coalescing cross-thread wakeup backed by a non-blocking socket pair."""
+
+	def __init__(self, reader, writer, lock):
+		self._reader = reader
+		self._writer = writer
+		self._lock = lock
+		self._pending = False
+		self._terminal = False
+		self._closed = False
+		self._reader_released = False
+		self._writer_released = False
+
+	@property
+	def wait_object(self):
+		"""Return the opaque object registered for readable readiness."""
+		return self._reader
+
+	def _make_terminal(self):
+		"""Close the writer so EOF wakes the reader, without false latching."""
+		try:
+			self._writer.close()
+		except BaseException:
+			# A later notify must retry when neither send nor close established a
+			# visible wakeup.
+			return False
+		self._writer_released = True
+		self._terminal = True
+		self._pending = True
+		return True
+
+	def notify(self):
+		"""Publish one coalescing notification without blocking indefinitely."""
+		with self._lock:
+			if self._closed or self._pending or self._terminal:
+				return
+
+			for _attempt in range(_MAX_WAKEUP_IO_ATTEMPTS):
+				try:
+					sent = self._writer.send(b'\x00')
+				except InterruptedError:
+					continue
+				except BlockingIOError:
+					# A full non-blocking channel is already readable.
+					self._pending = True
+					return
+				except Exception:
+					self._make_terminal()
+					return
+
+				try:
+					made_progress = sent > 0
+				except Exception:
+					self._make_terminal()
+					return
+				if made_progress:
+					self._pending = True
+					return
+				self._make_terminal()
+				return
+
+			# Repeated interruption is terminal only if closing the writer really
+			# succeeds and therefore makes EOF observable on the reader.
+			self._make_terminal()
+
+	def drain(self):
+		"""Clear a normal pending byte while bounding interrupted receive retries."""
+		with self._lock:
+			if self._closed:
+				return
+
+			for _attempt in range(_MAX_WAKEUP_IO_ATTEMPTS):
+				try:
+					data = self._reader.recv(4096)
+				except InterruptedError:
+					continue
+				except BlockingIOError:
+					if not self._terminal:
+						self._pending = False
+					return
+				except Exception:
+					# Preserve pending state because the notification may remain unread.
+					return
+
+				if not data:
+					self._terminal = True
+					self._pending = True
+					return
+
+			# The bounded loop intentionally preserves pending state. A caller may
+			# retry drain, but notify cannot race in and create a lost wakeup.
+
+	def close(self):
+		"""Idempotently release both endpoints, retrying prior close failures."""
+		with self._lock:
+			self._closed = True
+			self._pending = False
+			self._terminal = True
+			for endpoint, released_name in (
+				(self._reader, '_reader_released'),
+				(self._writer, '_writer_released'),
+			):
+				if getattr(self, released_name):
+					continue
+				try:
+					endpoint.close()
+				except BaseException:
+					continue
+				setattr(self, released_name, True)
+
+
 def detect_micropython_machine_name(sys_mod: Any = None, os_mod: Any = None) -> str:
 	"""
 	Best-effort lookup of the active board/firmware machine name.
@@ -538,6 +651,14 @@ class Kernel:
 	def supports_external_wait_objects(self) -> bool:
 		"""Whether ``io_wait`` can wake on adapter-owned readiness objects."""
 		return False
+
+	def supports_wakeup_channel(self) -> bool:
+		"""Whether this kernel can wake a blocked scheduler from another thread."""
+		return False
+
+	def create_wakeup_channel(self) -> WakeupChannelLike:
+		"""Create an opaque cross-thread scheduler wakeup channel."""
+		raise NotImplementedError('Cross-thread wakeup channels are not supported.')
 
 	def supports_tcp_server(self) -> bool:
 		"""Whether this kernel implements the complete passive TCP contract."""
@@ -691,6 +812,7 @@ class Unix(Kernel):
 		import socket
 		import ssl
 		import sys
+		import threading
 		import time
 
 		self._errno = errno
@@ -708,6 +830,7 @@ class Unix(Kernel):
 		self._socket = socket
 		self._ssl = ssl
 		self._sys = sys
+		self._lock_factory = threading.Lock
 		self._time = time
 		self._poll_factory = getattr(select, 'poll', None)
 		return
@@ -803,6 +926,69 @@ class Unix(Kernel):
 
 	def supports_external_wait_objects(self) -> bool:
 		return True
+
+	def supports_wakeup_channel(self) -> bool:
+		"""Require a callable primitive rather than mere attribute presence."""
+		return callable(getattr(self._socket, 'socketpair', None))
+
+	def create_wakeup_channel(self) -> WakeupChannelLike:
+		"""Create a non-blocking socket-pair channel owned by this kernel."""
+		socket_pair = getattr(self._socket, 'socketpair', None)
+		if not callable(socket_pair):
+			raise NotImplementedError(
+				'This Unix platform does not provide a callable socketpair().'
+			)
+
+		acquired = []
+		try:
+			pair = socket_pair()
+			if TYPE_CHECKING:
+				pair = cast("Any", pair)
+			iterator = iter(pair)
+			reader = next(iterator)
+			acquired.append(reader)
+			writer = next(iterator)
+			acquired.append(writer)
+			try:
+				extra = next(iterator)
+			except StopIteration:
+				pass
+			else:
+				acquired.append(extra)
+				raise ValueError('socketpair() must return exactly two endpoints.')
+			if reader is writer:
+				raise ValueError('socketpair() endpoints must be distinct objects.')
+			for endpoint, required in (
+				(reader, ('setblocking', 'recv', 'close')),
+				(writer, ('setblocking', 'send', 'close')),
+			):
+				missing = [
+					name for name in required
+					if not callable(getattr(endpoint, name, None))
+				]
+				if missing:
+					raise TypeError(
+						'socketpair() endpoint is missing callable operations: {}.'.format(
+							', '.join(missing)
+						)
+					)
+			reader.setblocking(False)
+			writer.setblocking(False)
+			lock = self._lock_factory()
+		except BaseException:
+			released = []
+			for endpoint in reversed(acquired):
+				if any(endpoint is released_endpoint for released_endpoint in released):
+					continue
+				released.append(endpoint)
+				try:
+					closer = getattr(endpoint, 'close', None)
+					if callable(closer):
+						closer()
+				except BaseException:
+					pass
+			raise
+		return _SocketWakeupChannel(reader, writer, lock)
 
 	def supports_tcp_server(self) -> bool:
 		return True
@@ -1078,6 +1264,16 @@ class MicroPythonKernel(Kernel):
 
 	def supports_external_wait_objects(self) -> bool:
 		return bool(self._poll_factory)
+
+	def supports_wakeup_channel(self) -> bool:
+		# Poll support or a socketpair-shaped attribute does not prove that a
+		# constrained port can safely signal it from another thread or interrupt.
+		return False
+
+	def create_wakeup_channel(self) -> WakeupChannelLike:
+		raise NotImplementedError(
+			'Cross-thread wakeup channels are not supported by MicroPythonKernel.'
+		)
 
 	def supports_tcp_server(self) -> bool:
 		if not callable(getattr(self._socket, 'getaddrinfo', None)):
