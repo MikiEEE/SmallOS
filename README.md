@@ -223,6 +223,35 @@ If you do not install an error handler, the task still fails cleanly and the
 runtime keeps its internal state consistent, but adding `setErrorHandler(...)`
 is the recommended way to make these failures visible in applications.
 
+### Waking a Blocked Scheduler from Another Thread
+
+Kernels may provide an opaque wakeup channel for code that must request work
+such as server shutdown while the scheduler is blocked in I/O readiness:
+
+```python
+kernel = Unix()
+if not kernel.supports_wakeup_channel():
+    raise RuntimeError("cross-thread scheduler wakeup is unavailable")
+
+wakeup = kernel.create_wakeup_channel()
+
+async def watch_shutdown(task):
+    await task.wait_readable(wakeup.wait_object)
+    wakeup.drain()
+    # Apply the application-owned shutdown request on the scheduler thread.
+```
+
+Call `wakeup.notify()` from the external thread. Notifications are nonblocking
+and coalesce until the scheduler calls `drain()`. The owner must call `close()`
+after its scheduler wait has been detached; repeated close, notify, and drain
+calls during teardown are safe.
+
+`Unix` supports this contract when its socket module provides a callable
+`socketpair()`. Generic `MicroPythonKernel` deliberately reports it unsupported:
+a polling backend or socket-pair-shaped attribute alone does not establish safe
+cross-thread behavior on a constrained port. TCP serving and shutdown initiated
+by a task already running on the scheduler do not require this capability.
+
 ## Configuration
 
 The runtime now uses a first-class config object backed by
