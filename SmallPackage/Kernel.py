@@ -24,9 +24,21 @@ except ImportError:  # pragma: no cover - exercised on constrained runtimes
 if TYPE_CHECKING:
 	from collections.abc import Iterable, Mapping, Sequence
 	from typing import Any, cast
+	from ._types import SocketBuffer, SocketOperation, SocketRetryMode
 
 
 _UNSET = object()
+_SOCKET_OPERATIONS = ('accept', 'recv', 'send', 'handshake')
+
+
+def _validate_socket_operation(operation):
+	"""Reject retry classifications that do not name a supported operation."""
+	if operation not in _SOCKET_OPERATIONS:
+		raise ValueError(
+			'Unknown socket operation {!r}; expected one of: {}.'.format(
+				operation, ', '.join(_SOCKET_OPERATIONS)
+			)
+		)
 
 
 class _PassiveAddressInfo:
@@ -600,7 +612,8 @@ class Kernel:
 	def socket_connection_error(self, sock: Any) -> int:
 		return 0
 
-	def socket_send(self, sock: Any, data: bytes) -> int:
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
+		"""Send a bytes-like buffer without requiring an intermediate copy."""
 		return 0
 
 	def socket_recv(self, sock: Any, buffer_size: int) -> bytes:
@@ -636,6 +649,17 @@ class Kernel:
 
 	def socket_needs_write(self, exc: BaseException) -> bool:
 		return False
+
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		"""Return the readiness direction needed to retry one socket operation."""
+		_validate_socket_operation(operation)
+		if self.socket_needs_write(exc):
+			return 'write'
+		if self.socket_needs_read(exc):
+			return 'write' if operation == 'send' else 'read'
+		return None
 
 	def _poll_lookup_key(self, obj: Any) -> Any:
 		"""
@@ -865,7 +889,7 @@ class Unix(Kernel):
 	def socket_connection_error(self, sock):
 		return sock.getsockopt(self._socket.SOL_SOCKET, self._socket.SO_ERROR)
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
 		return sock.send(data)
 
 	def socket_recv(self, sock, buffer_size):
@@ -909,6 +933,25 @@ class Unix(Kernel):
 
 	def socket_needs_write(self, exc):
 		return isinstance(exc, self._ssl.SSLWantWriteError)
+
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		_validate_socket_operation(operation)
+		if isinstance(exc, self._ssl.SSLWantReadError):
+			return 'read'
+		if isinstance(exc, self._ssl.SSLWantWriteError):
+			return 'write'
+		would_block = {
+			value for value in (
+				getattr(self._errno, 'EAGAIN', None),
+				getattr(self._errno, 'EWOULDBLOCK', None),
+			) if value is not None
+		}
+		err = self._extract_errno(exc)
+		if err in would_block or (isinstance(exc, BlockingIOError) and err is None):
+			return 'write' if operation == 'send' else 'read'
+		return None
 
 
 class MicroPythonKernel(Kernel):
@@ -1175,7 +1218,7 @@ class MicroPythonKernel(Kernel):
 			pending = {
 				115, 11,
 			}
-			if err in pending or self.socket_needs_read(exc) or self.socket_needs_write(exc):
+			if err in pending or isinstance(exc, BlockingIOError):
 				return False
 			raise
 
@@ -1184,7 +1227,7 @@ class MicroPythonKernel(Kernel):
 		so_error = getattr(self._socket, 'SO_ERROR', 4)
 		return sock.getsockopt(sol_socket, so_error)
 
-	def socket_send(self, sock, data):
+	def socket_send(self, sock: Any, data: SocketBuffer) -> int:
 		return sock.send(data)
 
 	def socket_recv(self, sock, buffer_size):
@@ -1267,6 +1310,27 @@ class MicroPythonKernel(Kernel):
 		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
 			return True
 		return False
+
+	def socket_retry_mode(
+		self, exc: BaseException, operation: SocketOperation
+	) -> SocketRetryMode:
+		_validate_socket_operation(operation)
+		want_read_error = getattr(self._ssl, 'SSLWantReadError', None)
+		if isinstance(want_read_error, type) and isinstance(exc, want_read_error):
+			return 'read'
+		want_write_error = getattr(self._ssl, 'SSLWantWriteError', None)
+		if isinstance(want_write_error, type) and isinstance(exc, want_write_error):
+			return 'write'
+		err = self._extract_errno(exc)
+		pending = {11}
+		if self._errno is not None:
+			for name in ('EAGAIN', 'EWOULDBLOCK'):
+				value = getattr(self._errno, name, None)
+				if value is not None:
+					pending.add(value)
+		if err in pending or (isinstance(exc, BlockingIOError) and err is None):
+			return 'write' if operation == 'send' else 'read'
+		return None
 
 	def machine_name(self):
 		'''
