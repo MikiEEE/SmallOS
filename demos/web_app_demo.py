@@ -184,16 +184,17 @@ def _home_page():
 async def _send_all(task, sock, data):
     """Write all bytes to a non-blocking socket using smallOS waits."""
     kernel = task.OS.kernel
-    remaining = memoryview(bytes(data))
+    remaining = data if isinstance(data, memoryview) else memoryview(data)
 
     while remaining:
         try:
             sent = kernel.socket_send(sock, remaining)
         except Exception as exc:
-            if kernel.socket_needs_read(exc):
+            retry_mode = kernel.socket_retry_mode(exc, "send")
+            if retry_mode == "read":
                 await task.wait_readable(sock)
                 continue
-            if kernel.socket_needs_write(exc):
+            if retry_mode == "write":
                 await task.wait_writable(sock)
                 continue
             raise
@@ -212,10 +213,11 @@ async def _read_request_head(task, sock):
         try:
             chunk = kernel.socket_recv(sock, 1024)
         except Exception as exc:
-            if kernel.socket_needs_read(exc):
+            retry_mode = kernel.socket_retry_mode(exc, "recv")
+            if retry_mode == "read":
                 await task.wait_readable(sock)
                 continue
-            if kernel.socket_needs_write(exc):
+            if retry_mode == "write":
                 await task.wait_writable(sock)
                 continue
             raise
@@ -369,10 +371,11 @@ async def web_server_task(task, state):
             try:
                 client_sock, client_addr = listener.accept()
             except Exception as exc:
-                if kernel.socket_needs_read(exc):
+                retry_mode = kernel.socket_retry_mode(exc, "accept")
+                if retry_mode == "read":
                     await task.wait_readable(listener)
                     continue
-                if kernel.socket_needs_write(exc):
+                if retry_mode == "write":
                     await task.wait_writable(listener)
                     continue
                 raise
