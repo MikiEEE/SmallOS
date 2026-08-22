@@ -1,6 +1,7 @@
 import os
 import sys
 import socket
+import threading
 import unittest
 
 sys.path.append("..")
@@ -424,6 +425,66 @@ class TestRuntime(unittest.TestCase):
             right.close()
 
         self.assertEqual(b"x", reader_task.result)
+
+    def test_unix_wakeup_channel_wakes_scheduler_across_repeated_thread_cycles(self):
+        kernel = Unix()
+        channel = kernel.create_wakeup_channel()
+        wait_entered = threading.Semaphore(0)
+        original_create_wait_set = kernel.create_io_wait_set
+
+        class ObservedWaitSet:
+            def __init__(self, inner):
+                self.inner = inner
+                self.readables = set()
+
+            def set_interest(self, obj, readable, writable):
+                if readable:
+                    self.readables.add(obj)
+                else:
+                    self.readables.discard(obj)
+                return self.inner.set_interest(obj, readable, writable)
+
+            def wait(self, timeout_ms=None):
+                if channel.wait_object in self.readables:
+                    wait_entered.release()
+                return self.inner.wait(timeout_ms)
+
+            def close(self):
+                return self.inner.close()
+
+        kernel.create_io_wait_set = lambda: ObservedWaitSet(original_create_wait_set())
+        runtime = SmallOS().setKernel(kernel)
+        detached = []
+        notifier_errors = []
+
+        async def waiter(task):
+            for _ in range(3):
+                ready = await task.wait_readable(channel.wait_object)
+                detached.append(ready not in task.OS.ioReadWaiters)
+                channel.drain()
+            return "woke"
+
+        def notify_scheduler():
+            for _ in range(3):
+                if not wait_entered.acquire(timeout=1):
+                    notifier_errors.append("scheduler did not enter persistent wait")
+                channel.notify()
+
+        waiter_task = SmallTask(2, waiter, name="wakeup-waiter")
+        runtime.fork(waiter_task)
+        notifier = threading.Thread(target=notify_scheduler)
+        notifier.start()
+        try:
+            runtime.startOS()
+        finally:
+            notifier.join(timeout=1)
+            channel.close()
+
+        self.assertFalse(notifier.is_alive())
+        self.assertEqual([], notifier_errors)
+        self.assertEqual("woke", waiter_task.result)
+        self.assertEqual([True, True, True], detached)
+        self.assertNotIn(channel.wait_object, runtime.ioReadWaiters)
 
     def test_killing_io_waiter_clears_wait_registration(self):
         """Cancelling an I/O waiter should remove it from the runtime waiter map."""
