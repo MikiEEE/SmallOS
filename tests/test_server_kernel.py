@@ -158,11 +158,8 @@ class RecordingServerKernel:
         self._call("socket_accept")
         return object(), ("192.0.2.1", 5000)
 
-    def socket_needs_read(self, exc):
-        return False
-
-    def socket_needs_write(self, exc):
-        return False
+    def socket_retry_mode(self, exc, operation):
+        return None
 
     def socket_close(self, listener):
         self.calls.append("socket_close")
@@ -269,7 +266,9 @@ class TestServerKernelContract(unittest.TestCase):
             kernel.socket_setblocking(listener, False)
             with self.assertRaises(BlockingIOError) as raised:
                 kernel.socket_accept(listener)
-            self.assertTrue(kernel.socket_needs_read(raised.exception))
+            self.assertEqual(
+                "read", kernel.socket_retry_mode(raised.exception, "accept")
+            )
         finally:
             kernel.socket_close(listener)
 
