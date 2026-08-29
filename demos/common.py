@@ -25,6 +25,8 @@ from SmallPackage.Kernel import Kernel
 
 
 CONFIG_PATH = os.path.join(REPO_ROOT, "smallos.config.json")
+# Signals are integer slots. A named constant gives application-level meaning
+# to a slot without making that meaning part of the smallOS scheduler.
 DEMO_SIGNAL = 3
 
 
@@ -38,6 +40,9 @@ def load_demo_config(**overrides):
 
 def build_runtime(kernel: Kernel, **config_overrides: Any) -> SmallOS:
     """Create a ``SmallOS`` instance wired to the chosen kernel."""
+    # The kernel owns platform behavior; SmallOS owns task scheduling. Keeping
+    # this attachment explicit is what lets the same task code use Unix or a
+    # MicroPython board profile.
     runtime = SmallOS(config=load_demo_config(**config_overrides)).setKernel(kernel)
     return install_demo_error_handler(runtime)
 
@@ -93,6 +98,8 @@ def install_demo_error_handler(runtime, include_cancelled=False):
     """Attach the shared demo error logger to ``runtime``."""
 
     def _handler(event):
+        # Error handlers are synchronous observers. They report a task after
+        # finalization and must not try to drive coroutine work themselves.
         runtime.kernel.write(_format_failure_event(event))
 
     runtime.setErrorHandler(_handler, include_cancelled=include_cancelled)
@@ -110,6 +117,8 @@ async def worker(task):
 async def join_demo(task):
     """Show child spawning plus ordered ``join_all`` collection."""
     task.OS.print("join demo starting\n")
+    # Smaller priority numbers are scheduled first. The join result below is
+    # nevertheless returned in this caller-supplied order.
     fast = task.spawn(worker, priority=1, name="fast")
     medium = task.spawn(worker, priority=3, name="medium")
     slow = task.spawn(worker, priority=5, name="slow")
@@ -130,6 +139,7 @@ async def signal_demo(task):
     """Show a task blocked on a signal and then joined with its sender."""
     task.OS.print("signal demo waiting\n")
     sender = task.spawn(signal_sender, priority=max(1, task.priority - 1), name="signal_sender")
+    # wait_signal suspends this task; it does not block the scheduler thread.
     signal = await task.wait_signal(DEMO_SIGNAL)
     sender_result = await task.join(sender)
     task.OS.print("signal demo resumed on {} with {}\n".format(signal, sender_result))
@@ -145,6 +155,8 @@ async def startup_banner(task, board_name):
 
 def default_tasks(board_name):
     """Return a small starter task set used by most demos."""
+    # Each SmallTask wraps an async routine. fork() later assigns PIDs and puts
+    # these ready tasks into their per-priority FIFO queues.
     return [
         SmallTask(2, startup_banner, name="startup_banner", args=(board_name,)),
         SmallTask(4, signal_demo, name="signal_demo"),

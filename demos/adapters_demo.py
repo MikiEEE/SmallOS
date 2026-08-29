@@ -28,6 +28,8 @@ async def blocking_adapter_demo(
     task: SmallTask[str],
     adapter: ThreadAdapter,
 ) -> str:
+    # adapter.call emits a smallOS-owned instruction. The worker thread never
+    # mutates scheduler queues or resumes this task directly.
     result = await adapter.call(blocking_library_call, "SmallOS")
     task_runtime(task).print(result + "\n")
     return result
@@ -37,6 +39,8 @@ async def asyncio_adapter_demo(
     task: SmallTask[str],
     adapter: AsyncioAdapter,
 ) -> str:
+    # The callable runs on the adapter's persistent asyncio loop, then its result
+    # returns through a readiness object watched by the smallOS kernel.
     result = await adapter.call(asyncio_library_call, "SmallOS")
     task_runtime(task).print(result + "\n")
     return result
@@ -51,6 +55,8 @@ async def cooperative_peer(task: SmallTask[str]) -> str:
 
 def main() -> None:
     runtime = build_runtime(Unix())
+    # Adapter lifetime surrounds runtime.start(): shutdown is explicit, and a
+    # live adapter binds to the first SmallOS runtime that submits work to it.
     with ThreadAdapter(max_workers=2, max_pending=8) as blocking:
         with AsyncioAdapter(max_pending=8) as foreign_async:
             runtime.fork(
