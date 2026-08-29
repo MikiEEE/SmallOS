@@ -13,6 +13,8 @@ MQTT_QOS = 1
 
 
 async def mqtt_demo(task):
+    # Point these settings at a broker you control. QoS 1 is used so the demo
+    # visibly exercises acknowledgement handling rather than fire-and-forget.
     client = SmallMQTTClient(
         task,
         host=MQTT_HOST,
@@ -21,6 +23,7 @@ async def mqtt_demo(task):
         client_id="smallos-demo-client",
     )
     await client.connect()
+    # Every network await yields to smallOS while the broker socket is not ready.
     suback = await client.subscribe(MQTT_TOPIC, qos=MQTT_QOS)
     publish_info = await client.publish(MQTT_TOPIC, "hello from smallOS", qos=MQTT_QOS)
     task.OS.print("mqtt subscribed to {} with granted QoS {}\n".format(MQTT_TOPIC, suback["granted_qos"]))
@@ -30,6 +33,7 @@ async def mqtt_demo(task):
     task.OS.print(
         "mqtt received {} -> {} at QoS {}\n".format(message["topic"], message["payload"], message["qos"])
     )
+    # A clean MQTT disconnect is part of protocol cleanup, not just socket close.
     await client.disconnect()
     return message
 

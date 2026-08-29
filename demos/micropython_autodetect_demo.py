@@ -16,6 +16,9 @@ def maybe_connect_wifi(kernel):
 
 
 def main():
+    # Detection reads the firmware machine string and returns a matching built-in
+    # profile. Explicit ESP32/PicoW construction is preferable when an app needs
+    # profile-specific settings.
     kernel = build_micropython_kernel()
     maybe_connect_wifi(kernel)
 

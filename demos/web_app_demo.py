@@ -190,6 +190,8 @@ async def _send_all(task, sock, data):
         try:
             sent = kernel.socket_send(sock, remaining)
         except Exception as exc:
+            # Retry direction is operation-aware. TLS and some socket errors may
+            # require waiting for the opposite direction from the operation name.
             retry_mode = kernel.socket_retry_mode(exc, "send")
             if retry_mode == "read":
                 await task.wait_readable(sock)
@@ -271,6 +273,8 @@ async def web_client_handler(task, client_sock, client_addr, state):
     state["active_connections"] += 1
     task.OS.print("Accepted connection from {} (active connections: {})\n".format(client_addr, state["active_connections"]))
 
+    # The handler owns this accepted socket from dispatch through the finally
+    # block. Keeping one close owner prevents descriptor leaks and double-close.
     try:
         try:
             request_head = await _read_request_head(task, client_sock)
@@ -355,6 +359,8 @@ def _open_listener(kernel, host, port, backlog):
     if not kernel.supports_tcp_server():
         raise NotImplementedError("This kernel does not support passive TCP servers.")
 
+    # The resolved address record is intentionally opaque. Passing it unchanged
+    # keeps tuple layout and address-family details inside the active kernel.
     address_info = kernel.resolve_passive_address(host, port)
     listener = kernel.socket_open(address_info)
     try:
@@ -374,6 +380,8 @@ def _dispatch_client(task, client_sock, client_addr, state):
     kernel = task.OS.kernel
     try:
         kernel.socket_setblocking(client_sock, False)
+        # After spawn succeeds the handler owns the stream. Before that point,
+        # this function must roll it back if task registration fails.
         task.spawn(
             web_client_handler,
             priority=max(1, task.priority - 1),
@@ -401,6 +409,9 @@ async def web_server_task(task, state):
             try:
                 client_sock, client_addr = kernel.socket_accept(listener)
             except Exception as exc:
+                # A non-blocking listener normally reaches this path until a
+                # connection arrives. The readiness await keeps the one-thread
+                # scheduler free to run metrics, state, shell, and client tasks.
                 retry_mode = kernel.socket_retry_mode(exc, "accept")
                 if retry_mode == "read":
                     await task.wait_readable(listener)
@@ -419,6 +430,8 @@ async def web_server_task(task, state):
 def main():
     """Start the demo runtime and keep serving until interrupted."""
     runtime = build_runtime(Unix())
+    # The interactive shell can cancel/inspect server tasks. Python evaluation
+    # is disabled because it is unnecessary for this application demo.
     shell = BaseShell(prompt="webapp> ", allow_python=False)
     runtime.shells.append(shell.setOS(runtime))
 
@@ -431,6 +444,9 @@ def main():
         "demo_value": 0,
     }
 
+    # The listener receives the highest priority here. Maintenance loops are
+    # watchers, so the default runtime policy will not keep them alive after the
+    # server and shell work has ended.
     web_server = SmallTask(2, web_server_task, name="web_server", args=(state,))
     shell_stdin = shell.make_task(
         priority=3,

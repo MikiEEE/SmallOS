@@ -27,6 +27,8 @@ class AsyncioWorker:
         return loop_id
 
     async def open(self) -> int:
+        # These resources are created on the adapter loop, never on the smallOS
+        # scheduler thread or a temporary asyncio.run() loop.
         self.owner_loop_id = self._check_loop()
         self.queue = asyncio.Queue()
         self.worker_task = asyncio.create_task(self._run())
@@ -71,6 +73,8 @@ async def asyncio_example(
     service: AsyncioWorker,
 ) -> tuple[str, str]:
     """Create and reuse a loop-affine service across adapter calls."""
+    # Separate calls reuse the adapter's one persistent loop, which is required
+    # by queues, futures, clients, and background tasks with loop affinity.
     opened_loop = await adapter.call(service.open)
     try:
         first, first_loop = await adapter.call(service.process, "smallos")
@@ -89,6 +93,8 @@ def main() -> None:
     runtime = build_runtime(Unix())
     service = AsyncioWorker()
 
+    # The context manager stays open until all SmallOS work using the adapter is
+    # finished, then tears down the foreign loop deterministically.
     with AsyncioAdapter(max_pending=8) as foreign_async:
         target = SmallTask(
             2,
