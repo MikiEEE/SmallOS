@@ -11,6 +11,9 @@ import sys
 
 DEMO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "demos")
 if DEMO_DIR not in sys.path:
+    # demos/common.py is intentionally imported as a sibling by runnable demo
+    # files. Adding this directory preserves the original root command without
+    # duplicating the showcase implementation.
     sys.path.insert(0, DEMO_DIR)
 
 

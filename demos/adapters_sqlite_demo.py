@@ -20,6 +20,8 @@ class SQLiteStore:
         self.owner_thread_id: int | None = None
 
     def open(self) -> None:
+        # SQLite's default connection enforces same-thread use. Record the lane
+        # owner so this demo turns an ownership mistake into a clear exception.
         self.owner_thread_id = threading.get_ident()
         self.connection = sqlite3.connect(":memory:")
         self.connection.execute(
@@ -60,6 +62,9 @@ async def sqlite_example(
     store: SQLiteStore,
 ) -> list[tuple[int, str]]:
     """Create, use, and close SQLite entirely on the adapter worker."""
+    # Creation, every operation, and close all traverse the same one-worker lane.
+    # Creating the connection on the smallOS scheduler thread would violate the
+    # ownership contract as soon as the adapter tried to use it.
     await adapter.call(store.open)
     try:
         await adapter.call(
@@ -77,7 +82,8 @@ def main() -> None:
     runtime = build_runtime(Unix())
     store = SQLiteStore()
 
-    # One worker creates a serialized execution lane for this connection.
+    # One worker creates a serialized execution lane for this connection;
+    # max_pending bounds queued work without blocking the scheduler.
     with ThreadAdapter(max_workers=1, max_pending=8) as blocking:
         target = SmallTask(
             2,

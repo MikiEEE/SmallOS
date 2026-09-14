@@ -22,7 +22,11 @@ def maybe_connect_wifi(kernel):
 
 
 def main():
+    # The profile centralizes board-specific Wi-Fi, timing, socket, and polling
+    # behavior so the tasks below do not import MicroPython modules directly.
     kernel = ESP32(hostname=WIFI_HOSTNAME)
+    # Leave credentials as None when network access is not needed. Do not commit
+    # real secrets to a demo; inject them through your deployment workflow.
     maybe_connect_wifi(kernel)
 
     runtime = build_runtime(kernel)

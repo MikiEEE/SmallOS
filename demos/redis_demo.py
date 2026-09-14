@@ -11,6 +11,8 @@ REDIS_USE_TLS = False
 
 
 async def redis_demo(task):
+    # The native client speaks RESP over a cooperative SmallStream. It does not
+    # start an asyncio loop or a background thread.
     client = SmallRedisClient(
         task,
         host=REDIS_HOST,
@@ -23,6 +25,7 @@ async def redis_demo(task):
     value = await client.get("smallos:demo")
     task.OS.print("redis ping: {}\n".format(pong))
     task.OS.print("redis value: {}\n".format(value))
+    # This task created the connection, so it also owns deterministic cleanup.
     client.close()
     return value
 

@@ -30,6 +30,8 @@ async def shell_session(task):
     still uses the same command parser and runtime APIs as an interactive shell
     would.
     """
+    # The shell is already attached to this runtime. Commands below call the
+    # same APIs an interactive stdin-backed shell uses.
     shell = task.OS.shells[0]
     worker_pid = _pid_for_name(task.OS, "background_worker")
     script = [
@@ -45,6 +47,8 @@ async def shell_session(task):
     ]
 
     for command in script:
+        # Sleeping between commands proves background tasks continue to advance
+        # instead of a blocking input loop owning the process.
         await task.sleep(0.05)
         shell.run(command, show_prompt=False, echo_command=True, force_output=True)
         if not shell.is_running:
@@ -53,9 +57,13 @@ async def shell_session(task):
 
 
 def main():
+    # allow_python defaults to True for a local debugging shell. Disable it for
+    # any input source that is not fully trusted.
     shell = BaseShell()
     runtime = build_runtime(Unix())
     runtime.shells.append(shell.setOS(runtime))
+    # The scripted session is a normal task, so its output and priority interact
+    # with application work through the same scheduler.
     runtime.fork(
         [
             SmallTask(2, shell_session, name="shell_session"),

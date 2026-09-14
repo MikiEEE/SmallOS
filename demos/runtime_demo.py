@@ -19,6 +19,8 @@ async def priority_worker(task):
     """Simple child workload used to show priority-aware interleaving."""
     for step in range(3):
         task.OS.print("[{}] step {}\n".format(task.name, step))
+        # sleep() records a monotonic wake deadline and lets another ready task
+        # run; it never calls blocking time.sleep().
         await task.sleep(0.05)
     return task.name
 
@@ -26,9 +28,13 @@ async def priority_worker(task):
 async def join_demo(task):
     """Spawn three workers and collect their results in a fixed order."""
     task.OS.print("join demo starting\n")
+    # spawn() establishes the parent/child relationship and returns the child
+    # object, which can be passed directly to join() or join_all().
     fast = task.spawn(priority_worker, priority=1, name="fast")
     medium = task.spawn(priority_worker, priority=3, name="medium")
     slow = task.spawn(priority_worker, priority=5, name="slow")
+    # Completion timing may differ, but join_all preserves this requested order.
+    # A child exception would instead be raised into this parent task.
     results = await task.join_all([fast, medium, slow])
     task.OS.print("join demo results: {}\n".format(results))
     return results
@@ -48,6 +54,8 @@ async def http_request_task(task, base_url=HTTP_BASE_URL, path=HTTP_PATH):
 async def http_request_demo(task):
     """Show a network request running while the parent keeps doing work."""
     task.OS.print("http request demo starting\n")
+    # The child handles socket readiness while this parent continues independent
+    # cooperative work. No operating-system thread is created for the request.
     request = task.spawn(
         http_request_task,
         priority=max(1, task.priority - 1),
@@ -59,6 +67,7 @@ async def http_request_demo(task):
         task.OS.print("http request parent doing other work {}\n".format(step))
         await task.sleep(0.05)
 
+    # If the HTTP child failed, join() would raise that exception here.
     response = await task.join(request)
     task.OS.print("http request status: {} {}\n".format(response["status"], response["reason"]))
     task.OS.print("http request preview: {}\n".format(response["preview"]))
@@ -69,6 +78,8 @@ async def signal_sender(task):
     """Sleep for a while and then wake the parent by sending a signal."""
     await task.sleep(0.1)
     task.OS.print("sender raising signal 3\n")
+    # Signals are latched integer slots. Sending before the parent reaches its
+    # wait is safe because wait_signal() consumes an already-latched signal.
     task.sendSignal(task.parent.pid, 3)
     return "signal sent"
 
@@ -87,12 +98,18 @@ async def cooperative_demo(task):
     """Show a task voluntarily yielding without waiting on time or signals."""
     for index in range(5):
         task.OS.print("cooperative tick {}\n".format(index))
+        # yield_now() remains immediately runnable but gives the priority queues
+        # another scheduling opportunity.
         await task.yield_now()
     return "done"
 
 
 def main():
+    # build_runtime installs the Unix kernel, repository config, and a default
+    # task-failure observer shared by all demos.
     runtime = build_runtime(Unix())
+    # These are top-level peers. Lower numeric priorities are considered first;
+    # awaits still allow lower-priority work to make progress while peers wait.
     runtime.fork(
         [
             SmallTask(2, http_request_demo, name="http_request_demo"),
